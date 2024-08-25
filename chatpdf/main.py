@@ -3,6 +3,8 @@
 # https://python.langchain.com/v0.1/docs/modules/data_connection/text_embedding/
 # https://python.langchain.com/v0.1/docs/integrations/vectorstores/chroma/
 # https://python.langchain.com/v0.1/docs/modules/data_connection/retrievers/MultiQueryRetriever/
+# https://python.langchain.com/v0.1/docs/use_cases/question_answering/quickstart/
+# https://python.langchain.com/v0.2/docs/tutorials/rag/
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -10,6 +12,7 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_chroma import Chroma
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_openai import ChatOpenAI
+from langchain.chains import RetrievalQA
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -37,14 +40,27 @@ db = Chroma.from_documents(texts, embedding_model)
 
 #Question
 question = "아내가 먹고 싶어하는 음식은 무엇이야?"
-llm = ChatOpenAI(temperature = 0)
+llm = ChatOpenAI(model="gpt-4o")
 retriever_from_llm = MultiQueryRetriever.from_llm(
     retriever=db.as_retriever(), 
     llm=llm
     )
 
-# docs = retriever_from_llm.get_relevant_documents(query=question)
-docs = retriever_from_llm.invoke(input=question)
+# # docs = retriever_from_llm.get_relevant_documents(query=question)
+# docs = retriever_from_llm.invoke(input=question)
 
-print(len(docs))
-print(docs)
+# print(len(docs))
+# print(docs)
+
+# QA 체인을 생성
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    chain_type="stuff",  # or "map_reduce" or "refine" depending on your use case
+    retriever=retriever_from_llm,
+)
+
+# 질문
+question = "아내가 먹고 싶어하는 음식은 무엇이야?"
+result = qa_chain.invoke({"query": question})
+
+print(result)
