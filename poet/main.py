@@ -50,18 +50,21 @@
 #         st.write(result.content)
 #-------------------------
 # ch4: ollama serve 명령 후 진행해야 한다.
-from dotenv import load_dotenv
-import streamlit as st
-from langchain_community.chat_models import ChatOllama
+# from dotenv import load_dotenv
+# import streamlit as st
+# from langchain_community.chat_models import ChatOllama
 
-load_dotenv()
+# load_dotenv()
 
-llm = ChatOllama(
-    model="llama3.1")
-st.title("인공지능 시인")
-content = st.text_input("시의 주제를 제시해 주세요")
+# llm = ChatOllama(
+#     model="llama3.1")
+# st.title("인공지능 시인")
+# content = st.text_input("시의 주제를 제시해 주세요")
 
-if st.button("시 작성 요청하기"):
-    with st.spinner("시 작성 중"):
-        result = llm.invoke(content + "에 대한 시를 써줘")
-        st.write(result.content)
+# if st.button("시 작성 요청하기"):
+#     with st.spinner("시 작성 중"):
+#         result = llm.invoke(content + "에 대한 시를 써줘")
+#         st.write(result.content)
+
+#-------------------------
+# ch5
