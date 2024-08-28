@@ -15,6 +15,7 @@ from langchain_chroma import Chroma
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain_openai import ChatOpenAI
 from langchain.chains import RetrievalQA
+from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -63,13 +64,28 @@ if uploaded_file is not None:
     #load it into Chroma
     db = Chroma.from_documents(texts, embedding_model)
 
+    from langchain.callbacks.base import BaseCallbackHandler
+    class StreamHandler(BaseCallbackHandler):
+        def __init__(self, container, initial_text=""):
+            self.container = container
+            self.text = initial_text
+        def on_llm_new_token(self, token: str, **kwargs) -> None:
+            self.text+=token
+            self.container.markdown(self.text)
+
     # 질문
     st.header("PDF에게 질문을 해보세요.")
     question = st.text_input("질문을 입력하세요.")
     
     if st.button("질문하기"):
-        with st.spinner("wait for it..."):
-            llm = ChatOpenAI(model="gpt-4o")
+        with st.spinner("Wait for it..."):
+            chat_box = st.empty() # 빈 칸을 만듬
+            stream_handler = StreamHandler(chat_box)
+            llm = ChatOpenAI(
+                streaming=True, 
+                model="gpt-4o",
+                callbacks=[stream_handler]
+                )
             retriever_from_llm = MultiQueryRetriever.from_llm(
                 retriever=db.as_retriever(), 
                 llm=llm
@@ -88,4 +104,4 @@ if uploaded_file is not None:
                 retriever=retriever_from_llm,
             )
             result = qa_chain.invoke({"query": question})
-            st.write(result["result"])
+            # st.write(result["result"])
