@@ -30,4 +30,4 @@ if user_question := st.chat_input(placeholder="소득세에 관련된 궁금한 
             # 그리고 변수를 전달해야한다. 완성된 것을 저장해야하기 때문이다.
         st.session_state.message_list.append({"role": "ai", "content": ai_result})
         
-        # 문제점: 스트림이 동작하지 않고, 히스토리도 저장되지 않는다. 확인 필요함
+        # 주의: requirements.txt 외의 버전을 설치하면 stream, history 등이 적용되지 않는다. 확인해볼것
