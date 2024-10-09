@@ -1,3 +1,5 @@
 .env
 **/chroma/
 **/chroma-upstage/
+
+**/__pycache__/
