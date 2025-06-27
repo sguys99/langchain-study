@@ -5,3 +5,4 @@
 **/__pycache__/
 my_lecture/cache/
 *.db
+**/google/
