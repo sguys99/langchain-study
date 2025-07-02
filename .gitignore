@@ -6,3 +6,4 @@
 my_lecture/cache/
 *.db
 **/google/
+**/db
