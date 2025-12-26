@@ -8,4 +8,5 @@ dependencies = [
     "jupyter>=1.1.1",
     "langchain>=1.2.0",
     "langgraph>=1.0.5",
+    "python-dotenv>=1.2.1",
 ]
