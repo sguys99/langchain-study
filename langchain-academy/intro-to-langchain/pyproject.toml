@@ -13,5 +13,6 @@ dependencies = [
     "langchain-openai>=1.1.6",
     "langgraph>=1.0.5",
     "langgraph-cli>=0.4.11",
+    "langsmith>=0.5.1",
     "python-dotenv>=1.2.1",
 ]
