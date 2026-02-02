@@ -16,4 +16,5 @@ dependencies = [
     "langgraph-cli>=0.4.11",
     "langsmith>=0.5.1",
     "python-dotenv>=1.2.1",
+    "tavily-python>=0.7.21",
 ]
