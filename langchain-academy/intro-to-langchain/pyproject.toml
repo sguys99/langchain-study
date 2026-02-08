@@ -16,6 +16,7 @@ dependencies = [
     "langgraph-api>=0.7.14",
     "langgraph-cli[inmem]>=0.4.11",
     "langsmith>=0.5.1",
+    "pypdf>=6.6.2",
     "python-dotenv>=1.2.1",
     "tavily-python>=0.7.21",
 ]
