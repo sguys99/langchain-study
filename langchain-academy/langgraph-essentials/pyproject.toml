@@ -11,5 +11,5 @@ dependencies = [
     "langchain-community>=0.4.1",
     "langchain-openai>=1.1.7",
     "langgraph>=1.0.7",
-    "langgraph-cli>=0.4.12",
+    "langgraph-cli[inmem]>=0.4.12",
 ]
