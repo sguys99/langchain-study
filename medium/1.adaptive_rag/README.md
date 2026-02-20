@@ -39,3 +39,13 @@ ai-poc/
 └── README.md                     # Setup instructions
 
 ```
+
+
+### 실행
+```
+uvicorn backend.app:app --reload
+
+streamlit run frontend/ui.py
+
+
+```
