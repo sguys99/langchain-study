@@ -1,11 +1,14 @@
 import os
+import logging
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from rag_pipeline import AdaptiveRAG, build_vector_store
-from graph_workflow import create_workflow
+logger = logging.getLogger(__name__)
+
+from .rag_pipeline import AdaptiveRAG, build_vector_store
+from .graph_workflow import create_workflow
 
 load_dotenv()
 
@@ -56,7 +59,8 @@ async def ask(payload: AskRequest):
         return {"response": result["answer"]}
 
     except Exception as e:
+        logger.exception("RAG processing error")
         raise HTTPException(
             status_code=500,
-            detail="Internal RAG processing error"
+            detail=f"Internal RAG processing error: {e}"
         )
