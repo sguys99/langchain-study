@@ -20,4 +20,5 @@ dependencies = [
 members = [
     "langchain-academy/langchain-essentials",
     "langchain-academy/intro-to-langchain",
+    "medium/1.adaptive_rag",
 ]

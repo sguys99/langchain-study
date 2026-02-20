@@ -1,0 +1,21 @@
+[project]
+name = "1-adaptive-rag"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12.9"
+dependencies = [
+    "faiss-cpu>=1.13.2",
+    "fastapi>=0.129.0",
+    "langchain>=1.2.8",
+    "langchain-community>=0.4.1",
+    "langchain-text-splitters>=1.1.0",
+    "langgraph>=1.0.7",
+    "openai>=2.16.0",
+    "pydantic>=2.12.5",
+    "python-dotenv>=1.2.1",
+    "requests>=2.32.5",
+    "sentence-transformers>=5.2.3",
+    "streamlit>=1.54.0",
+    "uvicorn[standard]>=0.40.0",
+]
