@@ -28,7 +28,7 @@ services:
             retries: 5
             interval: 5s
     langgraph-api:
-        image: "my-image"
+        image: my-image
         ports:
             - "8123:8000"
         depends_on:
@@ -38,6 +38,6 @@ services:
                 condition: service_healthy
         environment:
             REDIS_URI: redis://langgraph-redis:6379
-            OPENAI_API_KEY: "your_openai_api_key"
-            LANGSMITH_API_KEY: "your_langsmith_api_key"
+            OPENAI_API_KEY: ${OPENAI_API_KEY}
+            LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
             POSTGRES_URI: postgres://postgres:postgres@langgraph-postgres:5432/postgres?sslmode=disable
