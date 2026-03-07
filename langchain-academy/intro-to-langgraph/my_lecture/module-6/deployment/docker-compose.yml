@@ -36,6 +36,8 @@ services:
                 condition: service_healthy
             langgraph-postgres:
                 condition: service_healthy
+        env_file:
+            - ../../../.env
         environment:
             REDIS_URI: redis://langgraph-redis:6379
             OPENAI_API_KEY: ${OPENAI_API_KEY}
