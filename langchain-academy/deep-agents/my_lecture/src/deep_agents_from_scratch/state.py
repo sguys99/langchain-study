@@ -15,7 +15,7 @@ from langchain.agents import AgentState  # updated in 1.0
 class Todo(TypedDict):
     """복잡한 워크플로우의 진행 상황을 추적하기 위한 구조화된 작업 항목입니다.
 
-    attuributes:
+    Attuributes:
         content: 작업에 대한 간결하고 구체적인 설명
         status: 현재 state - pending, in_progress, 또는 completed
     """
@@ -30,11 +30,11 @@ def file_reducer(left, right):
     에이전트 state의 files 필드에 대한 리듀서 함수로 사용되며,
     가상 파일 시스템에 대한 incremental 업데이트를 가능하게 합니다.
 
-    args:
+    Args:
         left: 왼쪽 dictionary (기존 파일)
         right: 오른쪽 dictionary (새 파일 또는 업데이트된 파일)
 
-    returns:
+    Returns:
         왼쪽 값을 오른쪽 값으로 덮어쓴 병합된 사전
     """
     if left is None:

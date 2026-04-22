@@ -4,44 +4,44 @@ This module contains all the system prompts, tool descriptions, and instruction
 templates used throughout the deep agents educational framework.
 """
 
-WRITE_TODOS_DESCRIPTION = """Create and manage structured task lists for tracking progress through complex workflows.
+WRITE_TODOS_DESCRIPTION = """복잡한 워크플로우의 진행 상황을 추적하기 위해 체계적인 작업 목록을 생성하고 관리합니다.
 
-## When to Use
-- Multi-step or non-trivial tasks requiring coordination
-- When user provides multiple tasks or explicitly requests todo list  
-- Avoid for single, trivial actions unless directed otherwise
+## 사용 시점
+- 조정이 필요한 다단계 또는 복잡한 작업
+- 사용자가 여러 작업을 제공하거나 명시적으로 할 일 목록(todo list)을 요청하는 경우  
+- 별도의 지시가 없는 한, 단일하고 단순한 작업에는 사용하지 마십시오
 
-## Structure
-- Maintain one list containing multiple todo objects (content, status, id)
-- Use clear, actionable content descriptions
-- Status must be: pending, in_progress, or completed
+## 구조
+- 여러 할 일 항목(content, status, ID)을 포함하는 하나의 목록을 유지합니다
+- 명확하고 실행 가능한 내용 설명을 사용하십시오
+- 상태는 반드시 pending, in_progress 또는 completed이어야 합니다
 
-## Best Practices  
-- Only one in_progress task at a time
-- Mark completed immediately when task is fully done
-- Always send the full updated list when making changes
-- Prune irrelevant items to keep list focused
+## 모범 사례  
+- 한 번에 하나의 in_progress 작업만 유지하십시오
+- 작업이 완전히 완료되면 즉시 완료로 표시하십시오
+- 변경 시 항상 전체 업데이트된 목록을 전송하십시오
+- 목록의 집중도를 유지하기 위해 관련 없는 항목을 정리하십시오
 
-## Progress Updates
-- Call TodoWrite again to change task status or edit content
-- Reflect real-time progress; don't batch completions  
-- If blocked, keep in_progress and add new task describing blocker
+## 진행 상황 업데이트
+- 작업 상태를 변경하거나 내용을 편집하려면 TodoWrite를 다시 호출하십시오
+- 진행 상황을 실시간으로 반영하십시오; 완료 작업을 일괄 처리하지 마십시오  
+- 작업이 차단된 경우, 상태를 '진행 중'으로 유지하고 차단 사유를 설명하는 새 작업을 추가하십시오
 
 ## Parameters
-- todos: List of TODO items with content and status fields
+- todos: 내용 및 상태 필드가 포함된 TODO 항목 목록
 
 ## Returns
-Updates agent state with new todo list."""
+새로운 할 일 목록으로 에이전트 상태를 업데이트합니다."""
 
-TODO_USAGE_INSTRUCTIONS = """Based upon the user's request:
-1. Use the write_todos tool to create TODO at the start of a user request, per the tool description.
-2. After you accomplish a TODO, use the read_todos to read the TODOs in order to remind yourself of the plan. 
-3. Reflect on what you've done and the TODO.
-4. Mark you task as completed, and proceed to the next TODO.
-5. Continue this process until you have completed all TODOs.
+TODO_USAGE_INSTRUCTIONS = """사용자의 요청에 따라:
+1. 사용자 요청 시작 시 도구 설명에 따라 write_todos 도구를 사용하여 TODO를 생성합니다.
+2. TODO를 완료한 후에는 read_todos를 사용하여 TODO를 확인하고 계획을 상기합니다.
+3. 수행한 작업과 TODO에 대해 되돌아봅니다.
+4. 작업을 완료로 표시하고 다음 TODO로 진행하십시오.
+5. 모든 TODO를 완료할 때까지 이 과정을 반복하십시오.
 
-IMPORTANT: Always create a research plan of TODOs and conduct research following the above guidelines for ANY user request.
-IMPORTANT: Aim to batch research tasks into a *single TODO* in order to minimize the number of TODOs you have to keep track of.
+중요: 모든 사용자 요청에 대해 반드시 TODO로 구성된 연구 계획을 수립하고, 위의 지침에 따라 연구를 수행하십시오.
+중요: 관리해야 할 TODO의 수를 최소화하기 위해 연구 작업을 *단일 TODO*로 묶어 처리하도록 하십시오.
 """
 
 LS_DESCRIPTION = """List all files in the virtual filesystem stored in agent state.
