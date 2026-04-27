@@ -16,9 +16,9 @@ from deep_agents_from_scratch.prompts import WRITE_TODOS_DESCRIPTION
 from deep_agents_from_scratch.state import DeepAgentState, Todo
 
 
-@tool(description=WRITE_TODOS_DESCRIPTION,parse_docstring=True)
+@tool(description=WRITE_TODOS_DESCRIPTION,parse_docstring=True) # True로 하면 LLM이 도구호출 할 때 설명까지 참고
 def write_todos(
-    todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId]
+    todos: list[Todo], tool_call_id: Annotated[str, InjectedToolCallId] # LLM은 이 id를 사용하지 않는다? 이전 강의 처럼..
 ) -> Command:
     """작업 계획 및 추적을 위해 에이전트의 할 일 목록을 생성하거나 업데이트합니다.
 
@@ -39,7 +39,7 @@ def write_todos(
     )
 
 
-@tool(parse_docstring=True)
+@tool(parse_docstring=True) # True로 하면 LLM이 도구호출 할 때 설명까지 참고
 def read_todos(
     state: Annotated[DeepAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
