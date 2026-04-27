@@ -44,32 +44,32 @@ TODO_USAGE_INSTRUCTIONS = """사용자의 요청에 따라:
 중요: 관리해야 할 TODO의 수를 최소화하기 위해 연구 작업을 *단일 TODO*로 묶어 처리하도록 하십시오.
 """
 
-LS_DESCRIPTION = """List all files in the virtual filesystem stored in agent state.
+LS_DESCRIPTION = """에이전트 state에 저장된 가상 파일 시스템의 모든 파일을 나열합니다.
 
-Shows what files currently exist in agent memory. Use this to orient yourself before other file operations and maintain awareness of your file organization.
+에이전트 memory에 현재 존재하는 파일을 표시합니다. 다른 파일 작업을 수행하기 전에 상황을 파악하고 파일 구조를 확인하는 데 이 기능을 사용하십시오.
 
-No parameters required - simply call ls() to see all available files."""
+매개변수가 필요하지 않습니다. ls()를 호출하기만 하면 사용 가능한 모든 파일을 확인할 수 있습니다."""
 
-READ_FILE_DESCRIPTION = """Read content from a file in the virtual filesystem with optional pagination.
+READ_FILE_DESCRIPTION = """가상 파일 시스템에 있는 파일의 내용을 선택적 페이지 단위로 읽습니다.
 
-This tool returns file content with line numbers (like `cat -n`) and supports reading large files in chunks to avoid context overflow.
+이 도구는 줄 번호와 함께 파일 내용을 반환하며(`cat -n`과 유사), 컨텍스트 오버플로를 방지하기 위해 대용량 파일을 여러 조각으로 나누어 읽을 수 있습니다.
 
-Parameters:
-- file_path (required): Path to the file you want to read
-- offset (optional, default=0): Line number to start reading from  
-- limit (optional, default=2000): Maximum number of lines to read
+매개변수:
+- file_path (필수): 읽을 파일의 경로
+- offset (선택 사항, 기본값=0): 읽기를 시작할 줄 번호
+- limit (선택 사항, 기본값=2000): 읽을 최대 줄 수
 
-Essential before making any edits to understand existing content. Always read a file before editing it."""
+편집을 시작하기 전에 기존 내용을 파악하는 것은 필수적입니다. 파일을 편집하기 전에 항상 내용을 읽어보십시오."""
 
-WRITE_FILE_DESCRIPTION = """Create a new file or completely overwrite an existing file in the virtual filesystem.
+WRITE_FILE_DESCRIPTION = """가상 파일 시스템에서 새 파일을 생성하거나 기존 파일을 완전히 덮어씁니다.
 
-This tool creates new files or replaces entire file contents. Use for initial file creation or complete rewrites. Files are stored persistently in agent state.
+이 도구는 새 파일을 생성하거나 파일 전체 내용을 덮어씁니다. 초기 파일 생성 또는 전체 재작성 시 사용하십시오. 파일은 에이전트 state에 영구적으로 저장됩니다.
 
-Parameters:
-- file_path (required): Path where the file should be created/overwritten
-- content (required): The complete content to write to the file
+매개변수:
+- file_path (required): 파일을 생성하거나 덮어쓸 경로
+- content (required): 파일에 기록할 전체 내용
 
-Important: This replaces the entire file content."""
+중요: 이 작업은 파일 전체 내용을 덮어씁니다."""
 
 FILE_USAGE_INSTRUCTIONS = """You have access to a virtual file system to help you retain and save context.
 
