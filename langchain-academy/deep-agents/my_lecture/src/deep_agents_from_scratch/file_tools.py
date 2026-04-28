@@ -32,16 +32,16 @@ def read_file(
     offset: int = 0,
     limit: int = 2000,
 ) -> str:
-    """Read file content from virtual filesystem with optional offset and limit.
+    """선택 사항인 오프셋 및 제한을 사용하여 가상 파일 시스템에서 파일 내용을 읽습니다.
 
     Args:
-        file_path: Path to the file to read
-        state: Agent state containing virtual filesystem (injected in tool node)
-        offset: Line number to start reading from (default: 0)
-        limit: Maximum number of lines to read (default: 2000)
+        file_path: 읽을 파일의 경로
+        state: 가상 파일 시스템을 포함하는 에이전트 상태(툴 노드에 주입됨)
+        offset: 읽기를 시작할 줄 번호(기본값: 0)
+        limit: 읽을 최대 줄 수(기본값: 2000)
 
     Returns:
-        Formatted file content with line numbers, or error message if file not found
+        줄 번호가 포함된 형식화된 파일 내용, 또는 파일을 찾을 수 없는 경우 오류 메시지
     """
     files = state.get("files", {})
     if file_path not in files:
@@ -73,16 +73,16 @@ def write_file(
     state: Annotated[DeepAgentState, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Write content to a file in the virtual filesystem.
+    """가상 파일 시스템의 파일에 내용을 기록합니다.
 
     Args:
-        file_path: Path where the file should be created/updated
-        content: Content to write to the file
-        state: Agent state containing virtual filesystem (injected in tool node)
-        tool_call_id: Tool call identifier for message response (injected in tool node)
+        file_path: 파일을 생성하거나 업데이트할 경로
+        content: 파일에 기록할 내용
+        state: 가상 파일 시스템을 포함하는 에이전트 상태(툴 노드에 주입됨)
+        tool_call_id: 메시지 응답을 위한 툴 호출 식별자(툴 노드에 주입됨)
 
     Returns:
-        Command to update agent state with new file content
+        새로운 파일 내용으로 에이전트 상태를 업데이트하는 명령
     """
     files = state.get("files", {})
     files[file_path] = content
