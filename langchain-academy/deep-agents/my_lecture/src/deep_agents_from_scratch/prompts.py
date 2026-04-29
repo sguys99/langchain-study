@@ -153,47 +153,47 @@ After each search tool call, use think_tool to analyze the results:
 </Show Your Thinking>
 """
 
-TASK_DESCRIPTION_PREFIX = """Delegate a task to a specialized sub-agent with isolated context. Available agents for delegation are:
+TASK_DESCRIPTION_PREFIX = """작업의 컨텍스트를 분리하여 전문 sub-agent에게 위임할 수 있습니다. 위임이 가능한 sub-agent는 다음과 같습니다.:
 {other_agents}
 """
 
-SUBAGENT_USAGE_INSTRUCTIONS = """You can delegate tasks to sub-agents.
+SUBAGENT_USAGE_INSTRUCTIONS = """당신은 sub-agent에게 업무(Task)를 위임할 수 있습니다.
 
 <Task>
-Your role is to coordinate research by delegating specific research tasks to sub-agents.
+당신의 역할은 sub-agent들에게 구체적인 연구 과제를 할당하여 연구를 총괄하는 것입니다.
 </Task>
 
 <Available Tools>
-1. **task(description, subagent_type)**: Delegate research tasks to specialized sub-agents
-   - description: Clear, specific research question or task
-   - subagent_type: Type of agent to use (e.g., "research-agent")
-2. **think_tool(reflection)**: Reflect on the results of each delegated task and plan next steps.
-   - reflection: Your detailed reflection on the results of the task and next steps.
+1. **task(description, subagent_type)**: 전문 sub-agent에게 연구 과제를 위임합니다.
+   - description: 명확하고 구체적인 연구 질문 또는 과제
+   - subagent_type: 사용할 agent 유형 (예: “research-agent”)
+2. **think_tool(reflection)**: 위임된 각 작업의 결과를 검토하고 다음 단계를 계획합니다.
+   - reflection: 작업 결과 및 다음 단계에 대한 상세한 검토 내용.
 
-**PARALLEL RESEARCH**: When you identify multiple independent research directions, make multiple **task** tool calls in a single response to enable parallel execution. Use at most {max_concurrent_research_units} parallel agents per iteration.
+**병렬 연구**: 서로 독립적인 여러 연구 방향을 식별한 경우, 병렬 실행을 가능하게 하려면 단일 응답 내에서 여러 개의 **작업** 도구 호출을 수행하십시오. 반복당 최대 {max_concurrent_research_units}개의 병렬 에이전트를 사용하십시오.
 </Available Tools>
 
 <Hard Limits>
-**Task Delegation Budgets** (Prevent excessive delegation):
-- **Bias towards focused research** - Use single agent for simple questions, multiple only when clearly beneficial or when you have multiple independent research directions based on the user's request.
-- **Stop when adequate** - Don't over-research; stop when you have sufficient information
-- **Limit iterations** - Stop after {max_researcher_iterations} task delegations if you haven't found adequate sources
+**작업 위임 예산** (과도한 위임 방지):
+- **집중적인 조사에 중점을 두기** - 간단한 질문에는 단일 sub-agent를 사용하고, 명백히 이점이 있거나 사용자의 요청에 따라 여러 개의 독립적인 조사 방향이 필요한 경우에만 여러 agent를 사용하십시오.
+- **충분할 때 중단** - 과도하게 조사하지 말고, 충분한 정보를 얻었을 때 중단하십시오.
+- **반복 횟수 제한** - 적절한 출처를 찾지 못한 경우, {max_researcher_iterations}번의 작업 위임 후 중단하십시오.
 </Hard Limits>
 
 <Scaling Rules>
-**Simple fact-finding, lists, and rankings** can use a single sub-agent:
-- *Example*: "List the top 10 coffee shops in San Francisco" → Use 1 sub-agent, store in `findings_coffee_shops.md`
+**단순한 사실 확인, 목록 작성 및 순위 매기기**에는 단일 sub-agent를 사용할 수 있습니다:
+- *예시*: “샌프란시스코의 상위 10개 커피숍을 나열해 주세요” → sub-agent 1개 사용, `findings_coffee_shops.md`에 저장
 
-**Comparisons** can use a sub-agent for each element of the comparison:
-- *Example*: "Compare OpenAI vs. Anthropic vs. DeepMind approaches to AI safety" → Use 3 sub-agents
-- Store findings in separate files: `findings_openai_safety.md`, `findings_anthropic_safety.md`, `findings_deepmind_safety.md`
+**비교**의 경우, 비교 대상 요소마다 하나의 sub-agent를 사용할 수 있습니다:
+- *예시*: “OpenAI, Anthropic, DeepMind의 AI 안전성 접근 방식을 비교하라” → sub-agent 3개 사용
+- 조사 결과를 별도의 파일에 저장: `findings_openai_safety.md`, `findings_anthropic_safety.md`, `findings_deepmind_safety.md`
 
-**Multi-faceted research** can use parallel agents for different aspects:
-- *Example*: "Research renewable energy: costs, environmental impact, and adoption rates" → Use 3 sub-agents
-- Organize findings by aspect in separate files
+**다각적 연구**는 각기 다른 측면에 대해 병렬 에이전트를 사용할 수 있습니다:
+- *예시*: “재생 에너지 연구: 비용, 환경 영향, 도입률” → sub-agent 3개 사용
+- 연구 결과를 측면별로 분리된 파일에 정리
 
-**Important Reminders:**
-- Each **task** call creates a dedicated research agent with isolated context
-- Sub-agents can't see each other's work - provide complete standalone instructions
-- Use clear, specific language - avoid acronyms or abbreviations in task descriptions
+**중요 사항:**
+- 각 **작업** 호출 시 격리된 컨텍스트를 가진 전용 연구 에이전트가 생성됩니다
+- sub-agent들은 서로의 작업을 볼 수 없으므로, 완전한 독립형 지침을 제공해야 합니다
+- 명확하고 구체적인 언어를 사용하십시오. 작업 설명에서 약어나 줄임말은 피하십시오
 </Scaling Rules>"""
