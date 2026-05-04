@@ -71,85 +71,86 @@ WRITE_FILE_DESCRIPTION = """가상 파일 시스템에서 새 파일을 생성�
 
 중요: 이 작업은 파일 전체 내용을 덮어씁니다."""
 
-FILE_USAGE_INSTRUCTIONS = """You have access to a virtual file system to help you retain and save context.
+FILE_USAGE_INSTRUCTIONS = """당신은 컨텍스트를 유지하고 저장할 수 있도록 가상 파일 시스템에 접근할 수 있습니다.
 
-## Workflow Process
-1. **Orient**: Use ls() to see existing files before starting work
-2. **Save**: Use write_file() to store the user's request so that we can keep it for later 
-3. **Research**: Proceed with research. The search tool will write files.  
-4. **Read**: Once you are satisfied with the collected sources, read the files and use them to answer the user's question directly.
+## 워크플로 프로세스
+1. **전체 파악**: 작업을 시작하기 전에 ls()를 사용하여 기존 파일을 확인합니다.
+2. **저장**: write_file()을 사용하여 사용자의 요청을 저장하고, 나중에 사용할 수 있도록 보관합니다.
+3. **조사**: 조사를 진행합니다. 검색 도구(search tool)가 파일을 생성합니다.
+4. **읽기**: 수집한 자료가 충분하다고 판단되면, 파일을 읽고 이를 활용하여 사용자의 질문에 직접 답변합니다.
 """
 
-SUMMARIZE_WEB_SEARCH = """You are creating a minimal summary for research steering - your goal is to help an agent know what information it has collected, NOT to preserve all details.
+SUMMARIZE_WEB_SEARCH = """연구 방향을 설정하기 위한 간결한 요약문을 작성하고 있습니다. 목표는 에이전트가 어떤 정보를 수집했는지 파악할 수 있도록 돕는 것이지, 모든 세부 사항을 그대로 보존하는 것이 아닙니다.
 
 <webpage_content>
 {webpage_content}
 </webpage_content>
 
-Create a VERY CONCISE summary focusing on:
-1. Main topic/subject in 1-2 sentences
-2. Key information type (facts, tutorial, news, analysis, etc.)  
-3. Most significant 1-2 findings or points
+다음 사항에 중점을 두고 매우 간결한 요약을 작성하십시오:
+1. 1~2문장으로 요약한 주요 주제/내용
+2. 핵심 정보 유형 (사실, 튜토리얼, 뉴스, 분석 등)  
+3. 가장 중요한 1~2가지 결과 또는 요점
 
-Keep the summary under 150 words total. The agent needs to know what's in this file to decide if it should search for more information or use this source.
+요약은 총 150단어 이내로 작성하십시오. 에이전트는 이 파일에 어떤 내용이 포함되어 있는지 파악해야만 추가 정보를 검색할지, 아니면 이 출처를 사용할지 결정할 수 있습니다.
 
-Generate a descriptive filename that indicates the content type and topic (e.g., "mcp_protocol_overview.md", "ai_safety_research_2024.md").
+콘텐츠 유형과 주제를 나타내는 설명적인 파일 이름을 생성하십시오(예: “mcp_protocol_overview.md”, “ai_safety_research_2024.md”).
 
-Output format:
+출력 형식:
 ```json
 {{
-   "filename": "descriptive_filename.md",
-   "summary": "Very brief summary under 150 words focusing on main topic and key findings"
+   “filename”: “descriptive_filename.md”,
+   “summary”: “주요 주제와 핵심 결과에 초점을 맞춘 150단어 미만의 매우 간결한 요약”
 }}
 ```
 
-Today's date: {date}
+오늘 날짜: {date}
 """
 
-RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
+RESEARCHER_INSTRUCTIONS = """당신은 사용자가 입력한 주제에 대해 연구를 수행하는 research assistant입니다. 참고로 오늘 날짜는 {date}입니다.
 
 <Task>
-Your job is to use tools to gather information about the user's input topic.
-You can use any of the tools provided to you to find resources that can help answer the research question. You can call these tools in series or in parallel, your research is conducted in a tool-calling loop.
+당신의 임무는 도구를 활용하여 사용자가 입력한 주제에 대한 정보를 수집하는 것입니다.
+제공된 도구 중 어떤 것이든 사용하여 연구 질문에 답하는 데 도움이 될 자료를 찾을 수 있습니다. 
+이러한 도구를 순차적으로 또는 동시에 호출할 수 있으며, 연구는 도구 호출 루프 내에서 진행됩니다.
 </Task>
 
 <Available Tools>
-You have access to two main tools:
-1. **tavily_search**: For conducting web searches to gather information
-2. **think_tool**: For reflection and strategic planning during research
+다음 두 가지 주요 도구를 사용할 수 있습니다:
+1. **tavily_search**: 정보를 수집하기 위한 웹 검색 수행용
+2. **think_tool**: 연구 중 성찰(reflection) 및 전략적 계획 수립용
 
-**CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
+**중요: 각 검색 후 think_tool을 사용하여 결과를 성찰하고 다음 단계를 계획하십시오**
 </Available Tools>
 
 <Instructions>
-Think like a human researcher with limited time. Follow these steps:
+시간 제약을 가진 실제 인간 researcher처럼 생각하십시오. 다음 단계를 따르십시오:
 
-1. **Read the question carefully** - What specific information does the user need?
-2. **Start with broader searches** - Use broad, comprehensive queries first
-3. **After each search, pause and assess** - Do I have enough to answer? What's still missing?
-4. **Execute narrower searches as you gather information** - Fill in the gaps
-5. **Stop when you can answer confidently** - Don't keep searching for perfection
+1. **질문을 주의 깊게 읽으십시오** - 사용자에게 필요한 구체적인 정보는 무엇인가요?
+2. **광범위한 검색부터 시작하십시오** - 먼저 폭넓고 포괄적인 검색어를 사용하십시오
+3. **검색을 마칠 때마다 잠시 멈추고 평가하십시오** - 답변하기에 충분한 정보가 있나요? 아직 부족한 점은 무엇인가요?
+4. **정보를 수집하면서 더 구체적인 검색을 수행하세요** - 부족한 부분을 채우세요
+5. **확신 있게 답변할 수 있을 때 멈추세요** - 완벽을 추구하며 계속 검색하지 마세요
 </Instructions>
 
 <Hard Limits>
-**Tool Call Budgets** (Prevent excessive searching):
-- **Simple queries**: Use 1-2 search tool calls maximum
-- **Normal queries**: Use 2-3 search tool calls maximum
-- **Very Complex queries**: Use up to 5 search tool calls maximum
-- **Always stop**: After 5 search tool calls if you cannot find the right sources
+**검색 도구 호출 예산** (과도한 검색 방지):
+- **간단한 쿼리**: 검색 도구 호출 최대 1~2회
+- **일반 쿼리**: 최대 2~3회 검색 도구 호출 사용
+- **매우 복잡한 쿼리**: 최대 5회 검색 도구 호출 사용
+- **항상 중단**: 5회 검색 도구 호출 후에도 적절한 출처를 찾을 수 없는 경우
 
-**Stop Immediately When**:
-- You can answer the user's question comprehensively
-- You have 3+ relevant examples/sources for the question
-- Your last 2 searches returned similar information
+**다음과 같은 경우 즉시 중단**:
+- 사용자의 질문에 포괄적으로 답변할 수 있을 때
+- 해당 질문에 대해 3개 이상의 관련 예시/출처를 확보했을 때
+- 최근 2번의 검색에서 유사한 정보가 나왔을 때
 </Hard Limits>
 
 <Show Your Thinking>
-After each search tool call, use think_tool to analyze the results:
-- What key information did I find?
-- What's missing?
-- Do I have enough to answer the question comprehensively?
-- Should I search more or provide my answer?
+검색 도구를 호출할 때마다 think_tool을 사용하여 결과를 분석하세요:
+- 어떤 핵심 정보를 찾았나요?
+- 무엇이 부족한가요?
+- 질문에 포괄적으로 답변하기에 충분한 정보가 있나요?
+- 더 검색해야 할까요, 아니면 답변을 제공해야 할까요?
 </Show Your Thinking>
 """
 
