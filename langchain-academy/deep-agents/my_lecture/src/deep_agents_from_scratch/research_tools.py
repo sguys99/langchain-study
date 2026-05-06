@@ -22,7 +22,7 @@ from deep_agents_from_scratch.prompts import SUMMARIZE_WEB_SEARCH
 from deep_agents_from_scratch.state import DeepAgentState
 
 # Summarization model 
-summarization_model = init_chat_model(model="openai:gpt-4o-mini")
+summarization_model = init_chat_model(model="anthropic:claude-sonnet-4-6")
 tavily_client = TavilyClient()
 
 class Summary(BaseModel):
@@ -40,16 +40,16 @@ def run_tavily_search(
     topic: Literal["general", "news", "finance"] = "general", 
     include_raw_content: bool = True, 
 ) -> dict:
-    """Perform search using Tavily API for a single query.
+    """Tavily API를 사용하여 단일 쿼리에 대한 검색을 수행합니다.
 
     Args:
-        search_query: Search query to execute
-        max_results: Maximum number of results per query
-        topic: Topic filter for search results
-        include_raw_content: Whether to include raw webpage content
+        search_query: 실행할 검색 쿼리
+        max_results: 쿼리당 최대 결과 수
+        topic: 검색 결과에 대한 주제 필터
+        include_raw_content: 웹페이지 원본 콘텐츠를 포함할지 여부
 
     Returns:
-        Search results dictionary
+        검색 결과 딕셔너리
     """
     result = tavily_client.search(
         search_query,
@@ -61,13 +61,13 @@ def run_tavily_search(
     return result
 
 def summarize_webpage_content(webpage_content: str) -> Summary:
-    """Summarize webpage content using the configured summarization model.
+    """설정된 요약 모델을 사용하여 웹 페이지 내용을 요약합니다.
 
     Args:
-        webpage_content: Raw webpage content to summarize
+        webpage_content: 요약할 원본 웹 페이지 내용
 
     Returns:
-        Summary object with filename and summary
+        파일명과 요약 내용이 포함된 Summary 객체
     """
     try:
         # Set up structured output model for summarization
@@ -92,13 +92,13 @@ def summarize_webpage_content(webpage_content: str) -> Summary:
 
 
 def process_search_results(results: dict) -> list[dict]:
-    """Process search results by summarizing content where available.
+    """가능한 경우 내용을 요약하여 검색 결과를 처리합니다.
 
     Args:
-        results: Tavily search results dictionary
+        results: Tavily 검색 결과 사전
 
     Returns:
-        List of processed results with summaries
+        요약이 포함된 처리된 결과 리스트
     """
     processed_results = []
 
@@ -229,28 +229,28 @@ Files: {', '.join(saved_files)}
 
 @tool(parse_docstring=True)
 def think_tool(reflection: str) -> str:
-    """Tool for strategic reflection on research progress and decision-making.
+    """연구 진행 상황과 의사결정에 대한 전략적 성찰(reflection)을 돕는 도구.
 
-    Use this tool after each search to analyze results and plan next steps systematically.
-    This creates a deliberate pause in the research workflow for quality decision-making.
+    검색을 마칠 때마다 이 도구를 사용하여 결과를 분석하고 다음 단계를 체계적으로 계획하십시오.
+    이를 통해 연구 흐름 속에서 의도적인 정지로(a deliberate pause) 질 높은 의사결정을 내릴 수 있습니다.
 
-    When to use:
-    - After receiving search results: What key information did I find?
-    - Before deciding next steps: Do I have enough to answer comprehensively?
-    - When assessing research gaps: What specific information am I still missing?
-    - Before concluding research: Can I provide a complete answer now?
-    - How complex is the question: Have I reached the number of search limits?
+    사용 시점:
+    - 검색 결과를 확인한 후: 어떤 핵심 정보를 찾았는가?
+    - 다음 단계를 결정하기 전: 포괄적으로 답변하기에 충분한 정보가 있는가?
+    - 연구의 공백을 평가할 때: 아직 어떤 구체적인 정보가 부족한가?
+    - 연구를 마무리하기 전: 지금 완전한 답변을 제공할 수 있는가?
+    - 질문의 복잡성: 검색 횟수 한도에 도달했는가?
 
-    Reflection should address:
-    1. Analysis of current findings - What concrete information have I gathered?
-    2. Gap assessment - What crucial information is still missing?
-    3. Quality evaluation - Do I have sufficient evidence/examples for a good answer?
-    4. Strategic decision - Should I continue searching or provide my answer?
+    reflection 시 고려해야 할 사항:
+    1. 현재 발견 사항 분석 - 어떤 구체적인 정보를 수집했는가?
+    2. 공백 평가 - 여전히 누락된 중요한 정보는 무엇인가?
+    3. 품질 평가 - 훌륭한 답변을 내놓기에 충분한 증거/예시가 있는가?
+    4. 전략적 결정 - 검색을 계속해야 할까, 아니면 답변을 제공해야 할까?
 
     Args:
-        reflection: Your detailed reflection on research progress, findings, gaps, and next steps
+        reflection: 연구 진행 상황, 결과, 공백, 다음 단계에 대한 상세한 반성 내용
 
     Returns:
-        Confirmation that reflection was recorded for decision-making
-    """
+        의사결정을 위해 반성 내용이 기록되었음을 확인
+    """        
     return f"Reflection recorded: {reflection}"
