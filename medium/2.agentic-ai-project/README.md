@@ -117,3 +117,114 @@ User Question
 Complete Code is open sourced here.
 - https://github.com/alphaiterations/agentic-ai-usecases/tree/main/advanced/genai-observability
 
+### 2. 파일 구조
+
+```
+├── .env
+├── .gitignore
+├── README.md
+├── agent
+│   ├── __init__.py
+│   ├── graph.py
+│   ├── nodes.py
+│   ├── router.py
+│   └── state.py
+├── config.py
+├── data
+│   ├── ecommerce.db
+│   ├── faiss_index
+│   │   ├── index.faiss
+│   │   └── metadata.pkl
+│   └── raw
+│       ├── df_Customers.csv
+│       ├── df_OrderItems.csv
+│       ├── df_Orders.csv
+│       ├── df_Payments.csv
+│       └── df_Products.csv
+├── data_loader.py
+├── main.py
+├── medium_tutorial.md
+├── mlflow.db
+├── observability.py
+├── pdf_docs
+│   └── shopbr_return_policy.pdf
+├── requirements.txt
+├── session.py
+├── setup.py
+└── tools
+    ├── __init__.py
+    ├── rag_tool.py
+    ├── sql_tool.py
+    └── web_search_tool.py
+```
+
+### 3. 환경 세팅
+```
+OPENAI_API_KEY=your-open-api-key
+SERPER_API_KEY=your-serper-api-key
+MLFLOW_TRACKING_URI=http://localhost:5001
+MLFLOW_EXPERIMENT=ecommerce-agent
+```
+
+### 4. 데이터 로드
+데이터 소스 위치
+- https://www.kaggle.com/datasets/bytadit/ecommerce-order-dataset?resource=download
+
+
+이 프로젝트에서 사용된 데이터셋은 Kaggle에서 제공되는 ‘E-commerce Order Dataset’입니다. 이 데이터셋은 주문, 고객, 상품, 결제, 물류에 이르기까지 엔드투엔드 전자상거래 시스템의 다양한 측면을 다중 테이블 형식으로 제공합니다.
+
+대체로 이 데이터셋은 고객이 주문을 하는 순간부터 최종 배송에 이르기까지 주문의 전체 라이프사이클을 시뮬레이션합니다.
+
+#### 4.1 데이터셋 주요 데이터
+
+1. Orders
+주문의 핵심 라이프사이클 정보를 포함합니다:
+
+주문 ID, 고객 ID
+주문 상태 (배송 완료, 취소 등)
+구매, 승인 및 배송 타임스탬프
+예상 배송일
+👉 배송 지연 분석, 주문 흐름 파악 및 라이프사이클 추적에 유용합니다.
+
+2. Order Items
+각 주문 내의 품목을 나타냅니다:
+
+상품 ID 및 판매자 ID
+가격 및 배송비
+주문당 여러 품목 지원
+👉 매출 분석 및 장바구니 수준 인사이트 파악에 필수적입니다.
+
+3. Customers
+고객 수준 메타데이터:
+
+고객 ID
+위치(도시, 주, 우편번호)
+👉 지리적 분석 및 세분화를 가능하게 합니다.
+
+4. Payments
+결제 거래 세부 정보:
+
+결제 수단(신용카드 등)
+할부
+결제 금액
+👉 결제 행동 및 성공률을 파악하는 데 유용합니다.
+
+5. Products
+상품 카탈로그 정보:
+
+상품 카테고리
+물리적 속성(무게, 크기)
+
+
+config.py, data_loader.py 파일 확인요
+
+```
+uv run data_loader.py
+```
+
+#### 4.3 pdf data
+- 파일 경로: pdf_docs/shopbr_return_policy.pdf (참고: 이 파일은 합성 생성된 PDF입니다).
+- 전자상거래 플랫폼 내 여러 상품 카테고리에 걸친 반품, 환불 및 교환 규정을 요약한, LLM(대규모 언어 모델)로 생성된 구조화된 정책 문서
+반품 기간, 조건 및 예외 사항을 포함하여 카테고리별(예: 전자제품, 패션, 식료품) 상세 정책을 담고 있음
+- RAG 파이프라인을 위한 비정형 지식 소스 역할을 하여, 시스템이 정책 관련 사용자 질의에 답변할 수 있도록 지원
+
