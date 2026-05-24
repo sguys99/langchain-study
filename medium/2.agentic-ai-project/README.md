@@ -228,3 +228,64 @@ uv run data_loader.py
 반품 기간, 조건 및 예외 사항을 포함하여 카테고리별(예: 전자제품, 패션, 식료품) 상세 정책을 담고 있음
 - RAG 파이프라인을 위한 비정형 지식 소스 역할을 하여, 시스템이 정책 관련 사용자 질의에 답변할 수 있도록 지원
 
+### 5. 구성 및 가시성 기능
+#### 5.1 프로젝트 구성
+config.py 파일은 전체 GenAI 파이프라인의 중앙 제어 계층 역할을 하여, 모든 구성 요소가 일관된 설정과 공유된 구성으로 작동하도록 보장합니다.
+
+- API 키, 모델 매개변수 및 임베딩 구성을 관리합니다.
+- 데이터베이스, PDF 및 FAISS 인덱스 저장을 위한 데이터 경로를 정의합니다.
+- 청크 크기, 오버랩, 상위 k개 검색과 같은 RAG 동작을 구성합니다.
+- SQL, RAG 및 웹 검색 도구 전반에 걸친 라우팅 옵션을 지정합니다.
+
+#### 5.2 가시성 계층 (MLflow 추적 래퍼)
+observability.py 모듈은 MLflow를 사용하여 파이프라인의 모든 단계를 모니터링하는 재사용 가능한 추적 계층을 제공하며, 이를 통해 실행, 성능 및 비용에 대한 심층적인 가시성을 확보할 수 있습니다.
+
+@trace 데코레이터로 함수를 래핑하여 도구, LLM 호출 및 파이프라인에 대한 스팬을 자동으로 생성합니다.  
+수동 로깅 없이 모든 스팬에 대한 입력, 출력, 실행 시간 및 오류를 캡처합니다.
+토큰 사용량, 예상 비용 및 데이터 크기를 추적하여 효율성과 확장성을 모니터링합니다.  
+구조화된 메타데이터로 트레이스를 보강하여 디버깅 및 근본 원인 분석을 훨씬 쉽게 만듭니다.
+
+스팬 및 트레이스에서 캡처되는 주요 속성   
+다음 속성들은 우리의 가시성을 단순한 추적 그 이상으로 실질적으로 유용하게 만드는 요소들입니다:
+
+핵심 실행 속성
+
+- duration_ms → 각 스팬이 소요된 시간
+- error, error.message, error.type → 오류 추적
+- func.name, func.module → 실행 출처
+
+LLM 및 비용 추적
+
+- model.name → 사용된 모델 (예: gpt-4o-mini)
+- tokens.input, tokens.output, tokens.total → 토큰 사용량
+- cost.usd → 스팬당 예상 비용
+
+데이터 및 페이로드 추적
+- bytes.input, bytes.output → 입력/출력 크기
+- request → 사용자 쿼리 (자동 추출)
+- response → 모델/도구 출력
+
+검색 전용 속성 (RAG)
+- retrieval.model → 사용된 임베딩 모델
+- retrieval.top_k → 검색된 청크 수
+- retrieval.chunks → 반환된 청크 수
+- retrieval.sources → 소스 문서 수
+
+데이터베이스 / SQL 속성
+
+- db.type, db.path → 데이터베이스 메타데이터
+- db.rows_returned → 가져온 행 수
+- sql → 생성된 SQL 쿼리
+
+웹 검색 속성
+
+- api.provider, api.endpoint → 외부 API 세부 정보
+- search.top_links_count → 반환된 링크 수
+
+추적 수준 컨텍스트
+
+- request_preview → 사용자 쿼리의 요약 버전
+- response_preview → 최종 출력의 요약 버전
+
+해당내용은 @observability 파일 참고할 것.
+
