@@ -28,6 +28,7 @@ from config import (
     FAISS_INDEX_DIR,
 )
 from agent.graph import save_graph_visualization
+from observability import init as init_observability
 
 
 def _check_env() -> None:
@@ -142,6 +143,7 @@ def run_interactive(session: EcommerceSession) -> None:
 
 def main() -> None:
     _check_env()
+    init_observability()
 
     parser = argparse.ArgumentParser(description="E-Commerce Routing Agent")
     parser.add_argument(

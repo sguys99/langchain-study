@@ -63,7 +63,7 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
 _initialized = False
 
-def _init():
+def init():
     global _initialized
     if not _initialized and ENABLED:
         mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
@@ -132,7 +132,7 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
             if not ENABLED:
                 return func(*args, **kwargs)
 
-            _init()
+            init()
             span_name = name or func.__name__
 
             # Build inputs and calculate input size
@@ -290,7 +290,7 @@ def trace_span(name, span_type="CHAIN", attributes=None, model=None):
         yield None
         return
 
-    _init()
+    init()
 
     with mlflow.start_span(name=name, span_type=span_type) as span:
         start = time.perf_counter()
