@@ -34,6 +34,10 @@ RAG_TOP_K       = 4         # chunks retrieved per query
 CHUNK_SIZE      = 500       # characters per chunk
 CHUNK_OVERLAP   = 80        # character overlap between chunks
 
+# ── Web search settings ──────────────────────────────────────────────────────
+WEB_SEARCH_TOP_K   = 5      # results requested from Serper
+WEB_SEARCH_TIMEOUT = 10     # seconds
+
 # ── Routing ───────────────────────────────────────────────────────────────────
 # The router LLM call picks one of these exact route names
 ROUTES = ["sql", "rag", "web_search"]
