@@ -311,8 +311,259 @@ uv run python -m tools.rag_tool --force      # 강제 재빌드
   
 /tools/sql_tool.py 파일 참고할 것
 
-### 6.3 Websearch Tool
+#### 6.3 Websearch Tool
 - Serper API를 사용하여 웹에서 실시간 정보를 가져와 구조화된 결과(제목, URL, 요약문)를 반환합니다.
 - 내부 데이터나 RAG 컨텍스트를 사용하여 답변할 수 없는 쿼리에 대한 대체 수단으로 기능합니다.
 - 후속 합성 및 추론을 위해 LLM에 최적화된 깔끔한 검색 결과를 반환합니다.
 
+/tools/web_search_tool.py 파일 참고할 것
+
+### 7. Defining the Agentic Flow
+#### 7.1 Defining the Agent State
+
+#### 7.2 Router
+라우터는 추론 기능을 갖춘 LLM 기반 분류기를 사용하여 각 사용자 쿼리를 적절한 경로(SQL, RAG 또는 웹 검색)로 라우팅합니다.
+
+로깅을 위해 @trace(span_type=“PARSER”, model="...") 데코레이터를 추가하고, 함수 내에서는 span = mlflow.get_current_active_span()을 통해 스팬을 지정했다는 점에 유의하십시오.
+
+#### 7.3 LangGraph Nodes
+nodes.py 모듈은 파이프라인의 핵심 실행 로직을 정의하며, 각 노드는 라우팅, 도구 호출 또는 응답 생성이라는 특정 단계를 수행하는 동시에 그래프를 통해 상태를 전달합니다.
+
+이러한 노드들은 서로 결합되어 모듈식이며 관찰 가능한 워크플로를 형성하며, 이를 통해 SQL, RAG 및 웹 검색 경로에 걸쳐 동적인 의사 결정을 가능하게 합니다.
+
+- router_node()는 route_question()을 호출하여 sql, rag 또는 web_search 중 하나를 선택합니다.
+
+- sql_node()는 run_sql_tool()을 호출합니다.
+
+- rag_node()는 run_rag_tool()을 호출합니다.
+
+- web_search_node()는 `run_web_search_tool()`을 호출합니다.
+
+- synthesise_node()는 LLM을 사용하여 최종 답변을 생성합니다.
+
+- update_history_node()는 해당 턴을 기록에 추가합니다.
+
+#### 7.4 LangGraph Graph
+graph.py 모듈은 LangGraph의 전체 워크플로를 정의하며, 모든 노드를 조건부 실행 그래프로 연결하여 최종 응답을 생성하기 전에 사용자 쿼리를 SQL, RAG 또는 웹 검색 경로를 통해 동적으로 라우팅합니다.
+
+- 라우터의 결정에 따라 쿼리를 올바른 도구 노드로 안내하는 조건부 라우팅 로직을 구현합니다.
+- 라우팅 → 도구 실행 → 응답 생성 → 대화 기록 업데이트에 이르는 전체 파이프라인 흐름을 조정합니다.
+
+![](img/3.png)
+
+/agent/graph.py 파일 참고
+
+### 8. Define and Run setup.py
+1. Kaggle 전자상거래 데이터셋을 다운로드하고,
+2. CSV 파일을 SQLite로 가져오고,
+3. PDF 파일을 기반으로 FAISS 인덱스를 생성합니다.
+
+setup.py 파일 참고할 것
+
+다음 명령을 입력하면 저장소 내에 데이터셋 data/ecommerce.db와 벡터 데이터베이스용 data/faiss_index/index.faiss 파일이 생성됩니다.
+
+```
+uv run setup.py
+```
+
+### 9. Finally main.py
+main.py 파일은 애플리케이션의 진입점 역할을 하며, 세션을 초기화하고 필수 구성을 검증하는 동시에 GenAI 에이전트와 상호작용할 수 있는 대화형 CLI 및 데모 모드를 제공합니다.
+
+- SQL, RAG 및 웹 검색 경로를 테스트하기 위해 대화형 및 스크립트 기반 데모 모드를 모두 지원합니다.
+- LangGraph 파이프라인을 위한 세션 관리, 환경 검증 및 그래프 시각화를 처리합니다.
+
+
+10. Running the Application
+먼저 mlflow를 실행한다.
+
+```
+mlflow server --host 0.0.0.0 --port 5001
+```
+
+그 다음 main.py를 실행한다.
+```
+uv run main.py
+```
+
+그러면 3개의 쿼리가 자동으로 실행되며, 이 모든 내용은 MLFlow에 기록됩니다. 보시다시피, 각 요청은 MLFlow UI에서 완벽하게 추적 가능하며, 모든 의사 결정, 도구 호출 및 LLM 상호 작용이 표시됩니다.
+
+[턴 1] 사용자: 성공적으로 배송된 주문 건수는 몇 건인가요?
+
+- SQL
+
+[턴 2] 사용자: 2024년 브라질의 최신 전자상거래 트렌드는 무엇인가요?
+
+- 웹 검색
+
+[턴 3] 사용자: 전자제품에 대한 반품 정책은 어떻게 되어 있나요?
+
+- RAG
+
+다음은 터미널 출력 예시이다.
+```
+Graph visualization saved to agent_graph.png
+
+════════════════════════════════════════════════════════════
+  DEMO MODE — Scripted Multi-Turn Conversation
+════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────
+[Turn 1] USER: How many orders were delivered successfully?
+────────────────────────────────────────────────────────────
+
+[router] → SQL  |  The question asks for a specific count of orders, which is data that resides in the database.
+[sql_node] Generating and executing SQL …
+[sql_node] SQL: SELECT COUNT(o.order_id) AS delivered_orders_count
+FROM orders AS o
+WHERE o.order_status = 'delivered'
+LIMIT 50;
+[sql_node] 1 rows returned.
+[synthesise_node] Answer ready (279 chars).
+
+ASSISTANT:
+### Summary of Delivered Orders
+
+The total number of orders that were successfully delivered is **87,428**. 
+
+This figure indicates the volume of completed transactions where the order status is marked as 'delivered'. If you need further insights or breakdowns, feel free to ask!
+
+────────────────────────────────────────────────────────────
+[Turn 2] USER: What are the latest e-commerce trends in Brazil for 2024?
+────────────────────────────────────────────────────────────
+
+[router] → WEB_SEARCH  |  The question asks about current events and trends in the e-commerce industry, specifically for Brazil in 2024.
+[web_node] Searching the web …
+[web_node] 5 results for query: 'What are the latest e-commerce trends in Brazil for 2024?'
+[synthesise_node] Answer ready (1621 chars).
+
+ASSISTANT:
+### Latest E-commerce Trends in Brazil for 2024
+
+1. **Market Size and Growth**:
+   - Brazil's retail e-commerce market is projected to reach **$81.74 billion** in sales, making it the largest in Latin America (Source: [eMarketer](https://www.emarketer.com/content/retail-ecommerce-digital-buyer-trends-2024-brazil)).
+   - The market is expected to grow at a **CAGR of 30%** through 2024, indicating robust expansion (Source: [Merchant Risk Council](https://merchantriskcouncil.org/learning/resource-center/member-news/blog/2021/brazilian-ecommerce-data)).
+
+2. **Market Share**:
+   - E-commerce in Brazil is anticipated to represent around **28.5%** of the total market share in the region, driven by increased digitalization and evolving consumer preferences (Source: [MBE Franchise](https://mbefranchise.com/blog/e-commerce-in-brazil-navigating-a-thriving-digital-landscape-in-2024-2/)).
+
+3. **Future Projections**:
+   - Revenue in the Brazilian e-commerce market is expected to reach **$48.26 billion** by 2025, with a projected annual growth rate of **10.14%** from 2025 to 2029 (Source: [Asendia USA](https://www.asendiausa.com/hubfs/Brazil%20Ecommerce%20Market%20Insights_infographic_Asendia%20USA.pdf)).
+   - The B2C e-commerce market is forecasted to grow at a **CAGR of 17.7%** from 2024 to 2030 (Source: [Grand View Research](https://www.grandviewresearch.com/horizon/outlook/b2c-e-commerce-market/brazil)).
+
+These trends highlight a thriving e-commerce landscape in Brazil, characterized by significant growth and increasing consumer engagement. For more detailed insights, you can explore the provided sources.
+
+────────────────────────────────────────────────────────────
+[Turn 3] USER: What does our return policy say about electronics?
+────────────────────────────────────────────────────────────
+
+[router] → RAG  |  The question asks for specific information about the return policy, which is likely contained in uploaded documents.
+[rag_node] Retrieving document chunks …
+[rag_tool] Loading embedding model: sentence-transformers/all-MiniLM-L6-v2 …
+Loading weights: 100%|█████████████████████████████████| 103/103 [00:00<00:00, 7201.78it/s]
+BertModel LOAD REPORT from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:   can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+[rag_node] 4 chunks retrieved from: ['shopbr_return_policy.pdf']
+[synthesise_node] Answer ready (1158 chars).
+
+ASSISTANT:
+### Return Policy for Electronics at ShopBR
+
+According to the ShopBR return policy, the following points are highlighted regarding electronics:
+
+1. **Quality Standards**:
+   - Electronics are subject to heightened quality standards due to their complexity and value.
+
+2. **Return Eligibility**:
+   - Electronics can be returned if they are defective or damaged upon arrival.
+   - Returns for electronics that have been tampered with, misused, or physically damaged after delivery are ineligible.
+
+3. **Replacement and Refund**:
+   - If an electronic item is defective or damaged on arrival, customers are eligible for a replacement or a full refund.
+
+4. **Authorized Service Centers**:
+   - ShopBR partners with authorized service centers to ensure genuine replacements and professional repairs for electronics.
+
+5. **Return and Replacement Windows**:
+   - Specific return and replacement windows may apply, which are detailed in the policy.
+
+This policy is effective as of **January 1, 2024**, and complies with the Brazilian Consumer Defense Code (CDC). For more detailed information, please refer to the full document.
+
+_Sources: shopbr_return_policy.pdf_
+
+════════════════════════════════════════════════════════════
+  Demo complete.
+════════════════════════════════════════════════════════════
+
+════════════════════════════════════════════════════════════
+  Session fa83d5ae  |  3 turns
+════════════════════════════════════════════════════════════
+
+[User]
+How many orders were delivered successfully?
+
+[Assistant]
+### Summary of Delivered Orders
+
+The total number of orders that were successfully delivered is **87,428**. 
+
+This figure indicates the volume of completed transactions where the order status is marked as 'delivered'. If you need further insights or breakdowns, feel free to ask!
+
+[User]
+What are the latest e-commerce trends in Brazil for 2024?
+
+[Assistant]
+### Latest E-commerce Trends in Brazil for 2024
+
+1. **Market Size and Growth**:
+   - Brazil's retail e-commerce market is projected to reach **$81.74 billion** in sales, making it the largest in Latin America (Source: [eMarketer](https://www.emarketer.com/content/retail-ecommerce-digital-buyer-trends-2024-brazil)).
+   - The market is expected to grow at a **CAGR of 30%** through 2024, indicating robust expansion (Source: [Merchant Risk Council](https://merchantriskcouncil.org/learning/resource-center/member-news/blog/2021/brazilian-ecommerce-data)).
+
+2. **Market Share**:
+   - E-commerce in Brazil is anticipated to represent around **28.5%** of the total market share in the region, driven by increased digitalization and evolving consumer preferences (Source: [MBE Franchise](https://mbefranchise.com/blog/e-commerce-in-brazil-navigating-a-thriving-digital-landscape-in-2024-2/)).
+
+3. **Future Projections**:
+   - Revenue in the Brazilian e-commerce market is expected to reach **$48.26 billion** by 2025, with a projected annual growth rate of **10.14%** from 2025 to 2029 (Source: [Asendia USA](https://www.asendiausa.com/hubfs/Brazil%20Ecommerce%20Market%20Insights_infographic_Asendia%20USA.pdf)).
+   - The B2C e-commerce market is forecasted to grow at a **CAGR of 17.7%** from 2024 to 2030 (Source: [Grand View Research](https://www.grandviewresearch.com/horizon/outlook/b2c-e-commerce-market/brazil)).
+
+These trends highlight a thriving e-commerce landscape in Brazil, characterized by significant growth and increasing consumer engagement. For more detailed insights, you can explore the provided sources.
+
+[User]
+What does our return policy say about electronics?
+
+[Assistant]
+### Return Policy for Electronics at ShopBR
+
+According to the ShopBR return policy, the following points are highlighted regarding electronics:
+
+1. **Quality Standards**:
+   - Electronics are subject to heightened quality standards due to their complexity and value.
+
+2. **Return Eligibility**:
+   - Electronics can be returned if they are defective or damaged upon arrival.
+   - Returns for electronics that have been tampered with, misused, or physically damaged after delivery are ineligible.
+
+3. **Replacement and Refund**:
+   - If an electronic item is defective or damaged on arrival, customers are eligible for a replacement or a full refund.
+
+4. **Authorized Service Centers**:
+   - ShopBR partners with authorized service centers to ensure genuine replacements and professional repairs for electronics.
+
+5. **Return and Replacement Windows**:
+   - Specific return and replacement windows may apply, which are detailed in the policy.
+
+This policy is effective as of **January 1, 2024**, and complies with the Brazilian Consumer Defense Code (CDC). For more detailed information, please refer to the full document.
+
+_Sources: shopbr_return_policy.pdf_
+```
+
+## 결론
+Generative AI 시스템을 구축하는 것은 더 이상 단순히 정답을 얻는 것에 그치지 않습니다. 그 답이 어떻게 도출되었는지를 이해하는 것이 핵심입니다. 파이프라인이 검색, 추론, 외부 도구 활용을 포함하는 다단계의 자율적 워크플로로 진감함에 따라, 기존의 로깅 방식만으로는 한계가 있습니다. 단순히 어떤 일이 발생했는지뿐만 아니라, 왜 그런 일이 발생했는지에 대한 가시성이 필요합니다.
+
+바로 이 부분에서 MLflow의 가시성이 진가를 발휘합니다. 스팬(span), 트레이스(trace), 평가(evaluation)를 결합함으로써 개별 LLM 호출부터 전체 요청 라이프사이클 및 품질 지표에 이르기까지 시스템에 대한 완전하고 구조화된 뷰를 확보할 수 있습니다. Text2SQL + RAG + 웹 검색 파이프라인에서 이러한 접근 방식은 디버깅을 추측에 의존하는 작업에서 정밀하고 데이터 기반의 프로세스로 변화시킵니다.
+
+궁극적으로 가시성은 GenAI 시스템을 취약한 프로토타입에서 생산 환경에 바로 적용 가능한 신뢰할 수 있는 애플리케이션으로 탈바꿈시킵니다. 현실 세계에서는 파이프라인이 단순히 작동하는 것만으로는 충분하지 않기 때문입니다. 파이프라인이 어떻게 작동하는지 확인하고, 성능을 측정하며, 문제가 발생하면 이를 해결해야 합니다.
