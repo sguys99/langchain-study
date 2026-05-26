@@ -11,4 +11,5 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "numpy>=1.24.0",
     "openai>=2.14.0",
+    "voyageai>=0.3.7",
 ]
