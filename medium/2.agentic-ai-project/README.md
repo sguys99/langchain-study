@@ -1,8 +1,10 @@
+## Agentic AI Project: MLflow Observability for Generative AI - A Deep Dive with Text2SQL + RAG + WebSearch using LangGraph
+
 https://pub.towardsai.net/mlflow-observability-for-generative-ai-a-deep-dive-with-text2sql-rag-websearch-using-langgraph-2430c502adfa
 
-MLflow의 추적 시스템은 다음 세 가지 핵심 구성 요소를 통해 이러한 모든 문제를 해결합니다:
+MLflow의 추적 시스템(tracing system)은 다음 세 가지 핵심 구성 요소를 통해 이러한 모든 문제를 해결합니다:
 
-- 스팬(Spans): 이름이 지정되고 시간이 기록된 작업 단위(데이터 조회 호출, LLM 호출, SQL 실행 등)
+- 스팬(Spans): 이름과 시간이 기록된 작업 단위(데이터 조회 호출, LLM 호출, SQL 실행 등)
 - 추적(Traces): 전체 요청 라이프사이클을 나타내는 스팬의 계층적 트리
 - 평가(Evaluations): LLM-as-judge 또는 사용자 정의 스코어러를 활용한 구조화된 메트릭 로깅
 
@@ -29,7 +31,7 @@ GenAI 시스템에서는 각 단계가 단순히 기술적인 문제뿐만 아�
 
 
 
-2. 트레이스(Tracce): 단일 요청의 이야기
+2. 트레이스(Tracce): 단일 요청에 대한 스토리  
 트레이스란 단일 사용자 요청에 대한 스팬의 전체 트리를 말합니다.
 
 스팬이 “이 단계에서 무슨 일이 일어났는가?”에 답하는 반면, 트레이스는 “이 대화 순서에서 무슨 일이 일어났는가?”에 답합니다.
@@ -120,48 +122,66 @@ Complete Code is open sourced here.
 ### 2. 파일 구조
 
 ```
-├── .env
-├── .gitignore
-├── README.md
-├── agent
+├── .env                              # 실제 API 키 및 환경 변수 (Git 추적 제외)
+├── .env.example                      # 환경 변수 템플릿 (공유용 샘플)
+├── .gitignore                        # Git 추적에서 제외할 파일 목록
+├── .python-version                   # 프로젝트 Python 버전 고정 (uv/pyenv용)
+├── README.md                         # 프로젝트 소개 및 사용 가이드
+├── agent                             # LangGraph 에이전트 핵심 로직
 │   ├── __init__.py
-│   ├── graph.py
-│   ├── nodes.py
-│   ├── router.py
-│   └── state.py
-├── config.py
-├── data
-│   ├── ecommerce.db
-│   ├── faiss_index
-│   │   ├── index.faiss
-│   │   └── metadata.pkl
-│   └── raw
-│       ├── df_Customers.csv
-│       ├── df_OrderItems.csv
-│       ├── df_Orders.csv
-│       ├── df_Payments.csv
-│       └── df_Products.csv
-├── data_loader.py
-├── main.py
-├── medium_tutorial.md
-├── mlflow.db
-├── observability.py
-├── pdf_docs
-│   └── shopbr_return_policy.pdf
-├── requirements.txt
-├── session.py
-├── setup.py
-└── tools
-    ├── __init__.py
-    ├── rag_tool.py
-    ├── sql_tool.py
-    └── web_search_tool.py
+│   ├── graph.py                      # LangGraph 워크플로 정의 (노드 연결 및 조건부 라우팅)
+│   ├── nodes.py                      # 각 노드 구현 (router, sql, rag, web_search, synthesise, history)
+│   ├── router.py                     # LLM 기반 질문 분류기 (sql / rag / web_search 결정)
+│   └── state.py                      # AgentState TypedDict 정의 (그래프 간 전달되는 상태)
+├── config.py                         # 전역 설정 (API 키, 모델, 경로, RAG 파라미터 등)
+├── data                              # 데이터 저장소
+│   ├── ecommerce.db                  # SQLite DB (Text2SQL 도구의 쿼리 대상)
+│   ├── faiss_index                   # RAG용 벡터 인덱스
+│   │   ├── index.faiss               # FAISS 임베딩 인덱스
+│   │   └── metadata.pkl              # 청크별 원본 메타데이터
+│   └── raw                           # 원본 CSV 데이터
+│       ├── train                     # 학습/운영용 데이터 (SQLite 적재 대상)
+│       │   ├── df_Customers.csv
+│       │   ├── df_OrderItems.csv
+│       │   ├── df_Orders.csv
+│       │   ├── df_Payments.csv
+│       │   └── df_Products.csv
+│       └── test                      # 검증/테스트용 데이터
+│           ├── df_Customers.csv
+│           ├── df_OrderItems.csv
+│           ├── df_Orders.csv
+│           ├── df_Payments.csv
+│           └── df_Products.csv
+├── data_loader.py                    # CSV → SQLite 적재 스크립트
+├── img                               # README 및 문서용 이미지 리소스
+├── main.py                           # 애플리케이션 진입점 (CLI / 데모 모드 실행)
+├── mlartifacts                       # MLflow 실행 아티팩트 저장소 (자동 생성)
+├── mlflow.db                         # MLflow 트래킹 메타데이터 (SQLite 백엔드)
+├── notebooks                         # 탐색·실험용 Jupyter 노트북
+├── observability.py                  # MLflow 추적 래퍼 (@trace 데코레이터, 스팬/메트릭 로깅)
+├── pdf_docs                          # RAG 인덱싱 대상 PDF 문서
+│   └── shopbr_return_policy.pdf      # ShopBR 반품 정책 (합성 생성 문서)
+├── pyproject.toml                    # 프로젝트 메타데이터 및 의존성 (uv 관리)
+├── session.py                        # 대화 세션 관리 (멀티턴 히스토리 유지)
+├── setup.py                          # 초기 설정 (데이터 다운로드 → SQLite 적재 → FAISS 인덱스 빌드)
+├── tools                             # 에이전트가 호출하는 외부 도구 모음
+│   ├── __init__.py
+│   ├── rag_tool.py                   # PDF 청킹·임베딩 및 FAISS 유사도 검색
+│   ├── sql_tool.py                   # Text2SQL 생성 및 SQLite 실행
+│   └── web_search_tool.py            # Serper API 기반 실시간 웹 검색
+└── uv.lock                           # uv 의존성 잠금 파일 (재현 가능한 빌드 보장)
 ```
 
 ### 3. 환경 세팅
 ```
-OPENAI_API_KEY=your-open-api-key
-SERPER_API_KEY=your-serper-api-key
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-sonnet-4-6
+
+SERPER_API_KEY=
+
+VOYAGE_API_KEY=
+VOYAGE_MODEL=voyage-4-lite
+
 MLFLOW_TRACKING_URI=http://localhost:5001
 MLFLOW_EXPERIMENT=ecommerce-agent
 ```
@@ -175,45 +195,41 @@ MLFLOW_EXPERIMENT=ecommerce-agent
 
 대체로 이 데이터셋은 고객이 주문을 하는 순간부터 최종 배송에 이르기까지 주문의 전체 라이프사이클을 시뮬레이션합니다.
 
-#### 4.1 데이터셋 주요 데이터
+#### 4.1 주요 데이터
 
-1. Orders
-주문의 핵심 라이프사이클 정보를 포함합니다:
+1. Orders:  주문의 핵심 라이프사이클 정보를 포함
+- Order ID, customer ID
+- Order status (delivered, canceled, etc.)
+- Purchase, approval, and delivery timestamps
+- Estimated delivery date
 
-주문 ID, 고객 ID
-주문 상태 (배송 완료, 취소 등)
-구매, 승인 및 배송 타임스탬프
-예상 배송일
-👉 배송 지연 분석, 주문 흐름 파악 및 라이프사이클 추적에 유용합니다.
+ 👉 배송 지연 분석, 주문 흐름 파악 및 라이프사이클 추적에 유용.
 
-2. Order Items
-각 주문 내의 품목을 나타냅니다:
+2. Order Items: 각 주문 내의 품목
+- Product ID and seller ID
+- Price and shipping charges
+- Multiple items per order supported
 
-상품 ID 및 판매자 ID
-가격 및 배송비
-주문당 여러 품목 지원
-👉 매출 분석 및 장바구니 수준 인사이트 파악에 필수적입니다.
+👉 매출 분석 및 장바구니 수준 인사이트 파악에 필수적.
 
-3. Customers
-고객 수준 메타데이터:
+3. Customers: 고객 수준 메타데이터
+- Customer ID
+- Location (city, state, zip code)
 
-고객 ID
-위치(도시, 주, 우편번호)
-👉 지리적 분석 및 세분화를 가능하게 합니다.
+👉 지리적 분석 및 세분화 가능
 
-4. Payments
-결제 거래 세부 정보:
+4. Payments: 결제 거래 세부 정보
+- Payment method (credit card, etc.)
+- Installments
+- Payment value
 
-결제 수단(신용카드 등)
-할부
-결제 금액
-👉 결제 행동 및 성공률을 파악하는 데 유용합니다.
+👉 결제 행동 및 성공률을 파악하는 데 유용
 
-5. Products
-상품 카탈로그 정보:
+5. Products: 상품 카탈로그 정보
+- Product category
+- Physical attributes (weight, dimensions)
 
-상품 카테고리
-물리적 속성(무게, 크기)
+👉 상품 카테고리 레벨 인사이트 및 배송 분석에 유용
 
 
 config.py, data_loader.py 파일 확인요
@@ -222,11 +238,11 @@ config.py, data_loader.py 파일 확인요
 uv run data_loader.py
 ```
 
-#### 4.3 pdf data
-- 파일 경로: pdf_docs/shopbr_return_policy.pdf (참고: 이 파일은 합성 생성된 PDF입니다).
-- 전자상거래 플랫폼 내 여러 상품 카테고리에 걸친 반품, 환불 및 교환 규정을 요약한, LLM(대규모 언어 모델)로 생성된 구조화된 정책 문서
-반품 기간, 조건 및 예외 사항을 포함하여 카테고리별(예: 전자제품, 패션, 식료품) 상세 정책을 담고 있음
-- RAG 파이프라인을 위한 비정형 지식 소스 역할을 하여, 시스템이 정책 관련 사용자 질의에 답변할 수 있도록 지원
+#### 4.2 pdf data
+- 파일 경로: pdf_docs/shopbr_return_policy.pdf (참고: 이 파일은 합성 생성된 PDF)
+- 플랫폼 내 여러 상품 카테고리에 걸친 반품, 환불 및 교환 규정을 LLM(대규모 언어 모델)로 생성함
+- 반품 기간, 조건 및 예외 사항을 포함하여 카테고리별(예: 전자제품, 패션, 식료품) 상세 정책을 담고 있음
+- RAG 파이프라인을 위한 비정형 지식 소스 역할을 하여, 정책 관련 사용자 질의에 답변할 수 있도록 지원
 
 ### 5. 구성 및 가시성 기능
 #### 5.1 프로젝트 구성
