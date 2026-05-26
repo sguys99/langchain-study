@@ -9,6 +9,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 import json
+import re
 from anthropic import Anthropic
 from config import (
     LLM_MODEL,
@@ -65,8 +66,6 @@ def route_question(user_message: str, conversation_history: list[dict]) -> dict:
         for m in conversation_history[-4:]
     ]
     messages.append({"role": "user", "content": user_message})
-    # Prefill: assistant 턴을 '{' 로 시작시켜 JSON 출력 강제
-    messages.append({"role": "assistant", "content": "{"})
 
     response = client.messages.create(
         model=LLM_MODEL,
@@ -76,8 +75,9 @@ def route_question(user_message: str, conversation_history: list[dict]) -> dict:
         max_tokens=128,
     )
 
-    # prefill 토큰('{')은 응답에 포함되지 않으므로 복원
-    raw = "{" + response.content[0].text.strip()
+    raw_text = response.content[0].text.strip()
+    match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+    raw = match.group(0) if match else raw_text
 
     try:
         parsed = json.loads(raw)
