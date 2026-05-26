@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 1. 모델 클라이언트를 LangSmith 래퍼로 감싸기
-#    → 이 client로 호출되는 모든 messages.create 요청이 자동으로 LangSmith에 기록됨
 client = wrap_anthropic(Anthropic())
 
 # 2. 도구 함수에 @traceable 데코레이터를 붙여 도구 실행 자체도 추적 대상에 포함
