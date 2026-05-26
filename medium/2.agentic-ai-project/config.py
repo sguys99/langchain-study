@@ -13,6 +13,7 @@ load_dotenv()
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 SERPER_API_KEY    = os.getenv("SERPER_API_KEY", "")
+VOYAGE_API_KEY   = os.getenv("VOYAGE_API_KEY", "")
 
 # ── Model ─────────────────────────────────────────────────────────────────────
 LLM_MODEL       = "claude-sonnet-4-6"
