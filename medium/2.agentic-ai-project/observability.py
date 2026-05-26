@@ -17,10 +17,12 @@
 
 import os
 import functools
+import socket
 import time
 import json
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import urlparse
 
 import mlflow
 
@@ -63,12 +65,43 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
 _initialized = False
 
+def _probe_tracking_server(uri: str, timeout: float = 1.0) -> bool:
+    # Local backends (file:, sqlite:, …) need no probe; only HTTP needs one
+    # because mlflow.set_experiment() calls urllib3 which otherwise retries
+    # for tens of seconds before giving up.
+    parsed = urlparse(uri)
+    if parsed.scheme not in ("http", "https"):
+        return True
+    host = parsed.hostname or "localhost"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
 def init():
-    global _initialized
-    if not _initialized and ENABLED:
-        mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000"))
-        mlflow.set_experiment(os.getenv("MLFLOW_EXPERIMENT", "ecommerce-agent"))
+    global _initialized, ENABLED
+    if _initialized or not ENABLED:
+        return
+
+    uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    experiment = os.getenv("MLFLOW_EXPERIMENT", "ecommerce-agent")
+
+    if not _probe_tracking_server(uri):
+        print(
+            f"[observability] MLflow tracking server unreachable at {uri} — "
+            "disabling observability for this session. Start the server "
+            "(e.g. `mlflow server --host 0.0.0.0 --port 5001`) or set "
+            "MLFLOW_ENABLED=false to silence this warning."
+        )
+        ENABLED = False
         _initialized = True
+        return
+
+    mlflow.set_tracking_uri(uri)
+    mlflow.set_experiment(experiment)
+    _initialized = True
 
 # ── Size Calculation ─────────────────────────────────────────────────────────
 
