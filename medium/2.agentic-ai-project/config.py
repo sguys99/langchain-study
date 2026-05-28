@@ -20,8 +20,12 @@ LLM_MODEL       = "claude-sonnet-4-6"
 LLM_TEMPERATURE = 0.0
 LLM_MAX_TOKENS  = 1024
 
-# ── Embedding model (open-source, runs locally) ───────────────────────────────
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+# ── Embedding model ───────────────────────────────────────────────────────────
+# 상용 Voyage AI 임베딩 사용 (기본값: voyage-4-lite, .env 의 VOYAGE_MODEL 로 오버라이드 가능)
+EMBEDDING_MODEL = os.getenv("VOYAGE_MODEL", "voyage-4-lite")
+
+# 로컬(오픈소스) 임베딩 — 필요 시 위 EMBEDDING_MODEL 을 주석 처리하고 아래 줄을 사용
+# EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR        = os.path.dirname(os.path.abspath(__file__))

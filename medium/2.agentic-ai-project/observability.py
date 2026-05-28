@@ -1,17 +1,17 @@
 # observability.py
 # ─────────────────────────────────────────────────────────────────────────────
-# MLflow tracing with automatic cost calculation and size tracking.
+# MLflow 트레이싱: 비용 자동 계산 및 입출력 크기 추적
 #
-# Auto-captured attributes:
-#   - cost.usd          : Estimated cost based on tokens
-#   - tokens.input      : Input token count (estimated)
-#   - tokens.output     : Output token count (estimated)
-#   - bytes.input       : Input size in bytes
-#   - bytes.output      : Output size in bytes
-#   - duration_ms       : Execution time
+# 자동 수집 속성:
+#   - cost.usd          : 토큰 기반 추정 비용 (USD)
+#   - tokens.input      : 입력 토큰 수 (추정값)
+#   - tokens.output     : 출력 토큰 수 (추정값)
+#   - bytes.input       : 입력 크기 (바이트)
+#   - bytes.output      : 출력 크기 (바이트)
+#   - duration_ms       : 실행 시간 (밀리초)
 #
-# Usage:
-#   @trace(span_type="TOOL", model="claude-sonnet-4-6")  # Enables cost tracking
+# 사용 예:
+#   @trace(span_type="TOOL", model="claude-sonnet-4-6")  # 비용 추적 활성화
 #   def run_sql_tool(...): ...
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 
 import mlflow
 
-# ── Pricing (per 1M tokens) ────────────────────────────────────────────────
+# ── 모델 가격표 (100만 토큰당 USD) ──────────────────────────────────────────
 MODEL_PRICING = {
     # Anthropic Claude
     "claude-opus-4-7":   {"input": 15.00, "output": 75.00},
@@ -43,32 +43,45 @@ MODEL_PRICING = {
     "text-embedding-3-small": {"input": 0.02, "output": 0.00},
     "text-embedding-3-large": {"input": 0.13, "output": 0.00},
 
-    # Local embeddings (no API cost)
+    # Voyage AI 임베딩 (상용)
+    # 임베딩 모델은 입력 토큰만 과금되며 출력 비용은 없음
+    "voyage-3-large":        {"input": 0.18, "output": 0.00},
+    "voyage-3.5":            {"input": 0.06, "output": 0.00},
+    "voyage-3.5-lite":       {"input": 0.02, "output": 0.00},
+    "voyage-3":              {"input": 0.06, "output": 0.00},
+    "voyage-3-lite":         {"input": 0.02, "output": 0.00},
+    "voyage-4-lite":         {"input": 0.02, "output": 0.00},
+    "voyage-code-3":         {"input": 0.18, "output": 0.00},
+    "voyage-finance-2":      {"input": 0.12, "output": 0.00},
+    "voyage-law-2":          {"input": 0.12, "output": 0.00},
+    "voyage-multilingual-2": {"input": 0.12, "output": 0.00},
+
+    # 로컬 임베딩 (API 비용 없음)
     "sentence-transformers/all-MiniLM-L6-v2": {"input": 0.00, "output": 0.00},
 }
 
-# Rough token estimation (1 token ≈ 4 chars for English)
+# 토큰 수 대략 추정 (영어 기준 1 토큰 ≈ 4 문자)
 def estimate_tokens(text: str) -> int:
     if not text:
         return 0
     return len(text) // 4
 
 def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    # Fallback to Claude Sonnet pricing — the project's default LLM tier.
+    # 가격표에 없는 모델은 프로젝트 기본 LLM(Claude Sonnet) 가격으로 폴백
     pricing = MODEL_PRICING.get(model, {"input": 3.00, "output": 15.00})
     input_cost = (input_tokens / 1_000_000) * pricing["input"]
     output_cost = (output_tokens / 1_000_000) * pricing["output"]
     return round(input_cost + output_cost, 6)
 
-# ── Setup ────────────────────────────────────────────────────────────────────
+# ── 초기화 ──────────────────────────────────────────────────────────────────
 
 ENABLED = os.getenv("MLFLOW_ENABLED", "true").lower() == "true"
 _initialized = False
 
 def _probe_tracking_server(uri: str, timeout: float = 1.0) -> bool:
-    # Local backends (file:, sqlite:, …) need no probe; only HTTP needs one
-    # because mlflow.set_experiment() calls urllib3 which otherwise retries
-    # for tens of seconds before giving up.
+    # 로컬 백엔드(file:, sqlite: 등)는 프로브 불필요. HTTP만 확인하는 이유는
+    # mlflow.set_experiment() 내부에서 urllib3가 연결 실패 시 수십 초간
+    # 재시도하기 때문에 미리 차단하기 위함.
     parsed = urlparse(uri)
     if parsed.scheme not in ("http", "https"):
         return True
@@ -103,10 +116,10 @@ def init():
     mlflow.set_experiment(experiment)
     _initialized = True
 
-# ── Size Calculation ─────────────────────────────────────────────────────────
+# ── 크기 계산 ───────────────────────────────────────────────────────────────
 
 def calculate_size(obj: Any) -> int:
-    """Calculate approximate byte size of an object."""
+    """객체의 대략적인 바이트 크기를 계산."""
     try:
         if isinstance(obj, str):
             return len(obj.encode('utf-8'))
@@ -117,15 +130,15 @@ def calculate_size(obj: Any) -> int:
     except Exception:
         return 0
 
-# ── Request-arg extraction ───────────────────────────────────────────────────
+# ── 요청 인자 추출 ──────────────────────────────────────────────────────────
 
 _REQUEST_KEYWORDS = ("question", "message", "prompt", "query", "input")
 
 def _extract_request_arg(arg_names, args, kwargs):
-    """Pick the user-facing request string from a function's bound arguments.
+    """함수의 바인딩된 인자 중 사용자 요청 문자열을 선택.
 
-    Prefers a string arg whose name contains a request-like keyword
-    (question/message/prompt/query/input); falls back to the first string arg.
+    인자 이름에 요청 관련 키워드(question/message/prompt/query/input)가
+    포함된 문자열 인자를 우선 사용하고, 없으면 첫 번째 문자열 인자로 폴백.
     """
     def _iter_string_args():
         for i, arg_name in enumerate(arg_names):
@@ -145,17 +158,17 @@ def _extract_request_arg(arg_names, args, kwargs):
         return val
     return None
 
-# ── The Decorator (With Cost & Size Tracking) ────────────────────────────────
+# ── 데코레이터 (비용 및 크기 추적 포함) ─────────────────────────────────────
 
 def trace(name=None, span_type="CHAIN", attributes=None, model=None):
     """
-    Trace any function with automatic cost and size tracking.
+    함수에 트레이싱을 적용하고 비용/크기를 자동 추적.
 
     Args:
-        name: Span name (defaults to function name)
+        name: 스팬 이름 (기본값: 함수 이름)
         span_type: CHAIN, TOOL, RETRIEVER, PARSER, LLM
-        attributes: Dict of static attributes
-        model: Model name for cost tracking (e.g., "claude-sonnet-4-6")
+        attributes: 정적 속성 딕셔너리
+        model: 비용 추적용 모델 이름 (예: "claude-sonnet-4-6")
     """
     static_attrs = attributes or {}
 
@@ -168,7 +181,7 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
             init()
             span_name = name or func.__name__
 
-            # Build inputs and calculate input size
+            # 입력값 구성 및 입력 크기 계산
             inputs = {}
             input_text_parts = []
             arg_names = func.__code__.co_varnames[:func.__code__.co_argcount]
@@ -181,7 +194,7 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
                 else:
                     continue
 
-                # Store truncated version for display
+                # 화면 표시용으로 잘라낸 버전을 저장
                 display_val = val
                 if isinstance(val, str):
                     input_text_parts.append(val)
@@ -191,7 +204,7 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
                     input_text_parts.append(json.dumps(val))
                 inputs[arg_name] = display_val
 
-            # Resolve the user-facing request string once and reuse later.
+            # 진입 시점에 사용자 요청 문자열을 한 번 추출해 두고 이후 재사용
             request_arg = _extract_request_arg(arg_names, args, kwargs)
             if request_arg:
                 inputs["request"] = request_arg
@@ -201,22 +214,22 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
             start = time.perf_counter()
 
             with mlflow.start_span(name=span_name, span_type=span_type) as span:
-                # Set inputs
+                # 입력값 기록
                 if inputs:
                     span.set_inputs(inputs)
 
-                # Static attributes
+                # 정적 속성 기록
                 for key, value in static_attrs.items():
                     span.set_attribute(key, value)
 
-                # Function metadata
+                # 함수 메타데이터 기록
                 span.set_attribute("func.name", func.__name__)
                 span.set_attribute("func.module", func.__module__)
 
-                # Input size tracking
+                # 입력 크기 추적
                 span.set_attribute("bytes.input", input_size)
 
-                # Estimate input tokens if model specified
+                # 모델이 지정된 경우 입력 토큰 추정
                 if model:
                     input_text = " ".join(input_text_parts)
                     input_tokens = estimate_tokens(input_text)
@@ -226,15 +239,15 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
                 try:
                     result = func(*args, **kwargs)
 
-                    # Timing
+                    # 실행 시간 기록
                     elapsed = round((time.perf_counter() - start) * 1000, 2)
                     span.set_attribute("duration_ms", elapsed)
 
-                    # Output size
+                    # 출력 크기 기록
                     output_size = calculate_size(result)
                     span.set_attribute("bytes.output", output_size)
 
-                    # Estimate output tokens and calculate cost
+                    # 출력 토큰 추정 및 비용 계산
                     if model and isinstance(result, dict):
                         output_text = json.dumps(result) if result else ""
                         output_tokens = estimate_tokens(output_text)
@@ -245,10 +258,10 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
                         span.set_attribute("cost.usd", cost)
                         span.set_attribute("tokens.total", input_tokens + output_tokens)
 
-                    # Smart output extraction
+                    # 결과 유형별 출력 추출
                     if isinstance(result, dict):
                         outputs = {
-                            "response": result  # Explicitly capture full response
+                            "response": result  # 전체 응답을 명시적으로 캡처
                         }
                         if "error" in result:
                             outputs["error"] = result["error"]
@@ -257,19 +270,19 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
                             outputs["row_count"] = len(result["rows"])
                             span.set_attribute("db.rows_returned", len(result["rows"]))
                         if "sql" in result:
-                            outputs["sql"] = result["sql"]  # Capture full SQL
+                            outputs["sql"] = result["sql"]  # SQL 쿼리 전문 캡처
                         if "table_md" in result:
-                            outputs["table_md"] = result["table_md"]  # Capture formatted results
+                            outputs["table_md"] = result["table_md"]  # 마크다운 결과 캡처
                         if "chunks" in result:
                             outputs["chunk_count"] = len(result["chunks"])
-                            outputs["chunks"] = result["chunks"]  # Capture full chunk details
+                            outputs["chunks"] = result["chunks"]  # 검색된 청크 상세 캡처
                             span.set_attribute("retrieval.chunks", len(result["chunks"]))
                         if "sources" in result:
-                            outputs["sources"] = result["sources"]  # Capture sources
+                            outputs["sources"] = result["sources"]  # 출처 정보 캡처
                             span.set_attribute("retrieval.sources", len(result["sources"]))
                         if "results" in result:
                             outputs["result_count"] = len(result["results"])
-                            # Extract top-k links for web search results
+                            # 웹 검색 결과에서 상위 링크 추출
                             if result["results"] and isinstance(result["results"], list):
                                 top_links = [item.get("url") for item in result["results"] if item.get("url")]
                                 if top_links:
@@ -278,10 +291,10 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
 
                         span.set_outputs(outputs)
                     else:
-                        # For non-dict results, still capture as response
+                        # dict가 아닌 결과도 response 키로 캡처
                         span.set_outputs({"response": result})
 
-                    # Reuse the request resolved at entry for the trace-level update.
+                    # 진입 시 추출한 요청 문자열을 트레이스 레벨 업데이트에 재사용
                     request_str = request_arg
 
                     response_str = None
@@ -291,15 +304,15 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
                         response_str = result
                     else:
                         response_str = str(result)
-                    
-                    # Update the trace with request preview and response preview
-                    # Only include parameters that are not None to avoid nullifying them
+
+                    # 트레이스에 요청/응답 미리보기 업데이트
+                    # None 값은 기존 값을 덮어쓰지 않도록 제외
                     trace_update_kwargs = {}
                     if request_str:
                         trace_update_kwargs["request_preview"] = request_str[:500]
                     if response_str:
                         trace_update_kwargs["response_preview"] = response_str[:500]
-                    
+
                     if trace_update_kwargs:
                         mlflow.update_current_trace(**trace_update_kwargs)
 
@@ -314,11 +327,11 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
         return wrapper
     return decorator
 
-# ── Context Manager (Also with cost/size tracking) ───────────────────────────
+# ── 컨텍스트 매니저 (비용/크기 추적 포함) ───────────────────────────────────
 
 @contextmanager
 def trace_span(name, span_type="CHAIN", attributes=None, model=None):
-    """Trace a block of code with full tracking."""
+    """코드 블록을 트레이싱하며 비용/크기를 추적."""
     if not ENABLED:
         yield None
         return
@@ -346,17 +359,17 @@ def trace_span(name, span_type="CHAIN", attributes=None, model=None):
             span.set_attribute("error.message", str(e))
             raise
 
-# ── Helper: Manual Attribute Updates ────────────────────────────────────────
+# ── 헬퍼: 수동 속성 업데이트 ────────────────────────────────────────────────
 
 def set_attr(key: str, value):
-    """Set attribute on current span."""
+    """현재 스팬에 속성 하나를 설정."""
     if ENABLED:
         current = mlflow.get_current_active_span()
         if current:
             current.set_attribute(key, value)
 
 def set_attrs(attributes: dict):
-    """Set multiple attributes."""
+    """현재 스팬에 여러 속성을 한 번에 설정."""
     if ENABLED:
         current = mlflow.get_current_active_span()
         if current:
@@ -364,7 +377,7 @@ def set_attrs(attributes: dict):
                 current.set_attribute(key, value)
 
 def log_cost(model: str, input_tokens: int, output_tokens: int):
-    """Manually log cost for a span."""
+    """스팬에 비용을 수동으로 기록."""
     if ENABLED:
         cost = calculate_cost(model, input_tokens, output_tokens)
         set_attrs({
