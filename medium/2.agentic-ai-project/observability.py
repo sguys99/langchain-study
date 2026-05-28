@@ -241,7 +241,7 @@ def trace(name=None, span_type="CHAIN", attributes=None, model=None):
 
                     # 실행 시간 기록
                     elapsed = round((time.perf_counter() - start) * 1000, 2)
-                    span.set_attribute("duration_ms", elapsed)
+                    span.set_attribute("duration_ms", elapsed) # 함수 실행 시간 기록
 
                     # 출력 크기 기록
                     output_size = calculate_size(result)
