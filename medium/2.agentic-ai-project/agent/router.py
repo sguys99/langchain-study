@@ -1,9 +1,10 @@
 # agent/router.py
 # ─────────────────────────────────────────────────────────────────────────────
-# Router: Claude(Anthropic)로 사용자 메시지를 세 경로 중 하나로 분류합니다.
+# Router: Claude(Anthropic)로 사용자 메시지를 네 경로 중 하나로 분류합니다.
 #
 # Routes:
-#   sql        → 로컬 SQLite 이커머스 데이터베이스 질의
+#   sql        → 로컬 SQLite 이커머스 데이터베이스 직접 질의
+#   mcp_sql    → MCP SQLite 서버를 통한 SQL 실행 (스키마 탐색·재현성용)
 #   rag        → 업로드된 PDF 문서 검색
 #   web_search → Serper를 통한 실시간 웹 검색
 # ─────────────────────────────────────────────────────────────────────────────
@@ -73,7 +74,7 @@ def route_question(user_message: str, conversation_history: list[dict]) -> dict:
 
     반환값:
       {
-        "route":  str,   # "sql", "rag", "web_search" 중 하나
+        "route":  str,   # "sql", "mcp_sql", "rag", "web_search" 중 하나
         "reason": str,   # 라우팅 근거
       }
     """

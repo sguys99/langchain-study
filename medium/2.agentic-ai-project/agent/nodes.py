@@ -8,6 +8,7 @@ import mlflow
 from anthropic import Anthropic
 from agent.router import route_question
 from tools.sql_tool        import run_sql_tool
+from tools.mcp_sql_tool    import run_mcp_sql_tool
 from tools.rag_tool        import run_rag_tool
 from tools.web_search_tool import run_web_search_tool
 from config import LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, ANTHROPIC_API_KEY
@@ -61,7 +62,25 @@ def sql_node(state: dict) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def mcp_sql_node(state: dict) -> dict:
-    pass
+    """
+    Generate & execute a SQL query via the MCP SQLite server,
+    store raw result in state.
+    """
+    print("[mcp_sql_node] Generating and executing SQL via MCP …")
+    result = run_mcp_sql_tool(
+        user_question=state["user_message"],
+        conversation_history=state["conversation_history"],
+    )
+    print(f"[mcp_sql_node] SQL: {result['sql']}")
+    if result["error"]:
+        print(f"[mcp_sql_node] ERROR: {result['error']}")
+    else:
+        n_calls = len(result.get("mcp_tool_calls", []))
+        print(
+            f"[mcp_sql_node] {len(result['rows'])} rows via "
+            f"{n_calls} MCP tool calls."
+        )
+    return {"mcp_sql_result": result}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
