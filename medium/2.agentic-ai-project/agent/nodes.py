@@ -8,6 +8,7 @@ import mlflow
 from anthropic import Anthropic
 from agent.router import route_question
 from tools.sql_tool        import run_sql_tool
+from tools.mcp_sql_tool    import run_mcp_sql_tool
 from tools.rag_tool        import run_rag_tool
 from tools.web_search_tool import run_web_search_tool
 from config import LLM_MODEL, LLM_TEMPERATURE, LLM_MAX_TOKENS, ANTHROPIC_API_KEY
@@ -54,6 +55,29 @@ def sql_node(state: dict) -> dict:
     else:
         print(f"[sql_node] {len(result['rows'])} rows returned.")
     return {"sql_result": result}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Node 2a-mcp — MCP SQL Tool Node
+# ─────────────────────────────────────────────────────────────────────────────
+
+def mcp_sql_node(state: dict) -> dict:
+    """
+    MCP 서버(별도 subprocess)로 SQL 을 생성·실행한다.
+    기존 sql_node 와 동일한 입출력 패턴이지만 결과 키는 'mcp_sql_result' 이다.
+    """
+    print("[mcp_sql_node] Generating and executing SQL via MCP …")
+    result = run_mcp_sql_tool(
+        user_question=state["user_message"],
+        conversation_history=state["conversation_history"],
+    )
+    print(f"[mcp_sql_node] SQL: {result['sql']}")
+    print(f"[mcp_sql_node] MCP tool calls: {result.get('mcp_tool_calls', [])}")
+    if result["error"]:
+        print(f"[mcp_sql_node] ERROR: {result['error']}")
+    else:
+        print(f"[mcp_sql_node] {len(result['rows'])} rows returned.")
+    return {"mcp_sql_result": result}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -132,23 +156,25 @@ def synthesise_node(state: dict) -> dict:
     """
     route = state.get("route", "")
 
-    # ── SQL: tool returns raw rows — synthesise a narrative ─────────────────
-    if route == "sql":
-        sql_result = state.get("sql_result", {})
+    # ── SQL / MCP SQL: tool returns raw rows — synthesise a narrative ───────
+    if route in ("sql", "mcp_sql"):
+        result_key = "sql_result" if route == "sql" else "mcp_sql_result"
+        via        = "직접 연결" if route == "sql" else "MCP"
+        sql_result = state.get(result_key, {}) or {}
         sql_query  = sql_result.get("sql", "")
         table_md   = sql_result.get("table_md", "_결과 없음_")
         error      = sql_result.get("error")
 
         if error:
             content = (
-                f"SQL 쿼리 실행 중 오류가 발생했습니다:\n\n"
+                f"SQL 쿼리 실행 중 오류가 발생했습니다 (via {via}):\n\n"
                 f"```sql\n{sql_query}\n```\n\n"
                 f"오류: {error}\n\n"
                 "질문을 다시 표현해 주세요."
             )
         else:
             content = (
-                f"실행된 SQL 쿼리:\n```sql\n{sql_query}\n```\n\n"
+                f"실행된 SQL 쿼리 (via {via}):\n```sql\n{sql_query}\n```\n\n"
                 f"결과:\n{table_md}"
             )
 
@@ -164,7 +190,7 @@ def synthesise_node(state: dict) -> dict:
             span.set_inputs({
                 "system_prompt": _SYNTHESISE_SYSTEM,
                 "user_prompt": user_content,
-                "synthesis_type": "sql",
+                "synthesis_type": route,
                 "user_message": state['user_message']
             })
 

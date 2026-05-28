@@ -14,11 +14,12 @@ class AgentState(TypedDict):
     conversation_history: list[dict]   # [{"role": "user"|"assistant", "content": str}]
 
     # ── Routing ───────────────────────────────────────────────────────────────
-    route:        str                  # "sql" | "rag" | "web_search"
+    route:        str                  # "sql" | "mcp_sql" | "rag" | "web_search"
     route_reason: str                  # explanation from the router LLM
 
     # ── Tool outputs (only one will be populated per turn) ───────────────────
     sql_result:        Optional[dict]  # {sql, rows, table_md, error}
+    mcp_sql_result:    Optional[dict]  # {sql, rows, table_md, error, mcp_tool_calls}
     rag_result:        Optional[dict]  # {answer, chunks, sources}
     web_search_result: Optional[dict]  # {answer, results, query}
 

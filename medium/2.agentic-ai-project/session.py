@@ -49,6 +49,7 @@ class EcommerceSession:
                 "route":                "",
                 "route_reason":         "",
                 "sql_result":           None,
+                "mcp_sql_result":       None,
                 "rag_result":           None,
                 "web_search_result":    None,
                 "final_answer":         "",

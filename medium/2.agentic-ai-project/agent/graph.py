@@ -10,6 +10,7 @@
 #   router_node
 #     │
 #     ├── "sql"        ──▶ sql_node        ──┐
+#     ├── "mcp_sql"    ──▶ mcp_sql_node    ──┤
 #     ├── "rag"        ──▶ rag_node        ──┤
 #     └── "web_search" ──▶ web_search_node ──┤
 #                                            │
@@ -28,6 +29,7 @@ from agent.state import AgentState
 from agent.nodes import (
     router_node,
     sql_node,
+    mcp_sql_node,
     rag_node,
     web_search_node,
     synthesise_node,
@@ -37,6 +39,7 @@ from agent.nodes import (
 # Single source of truth: route key → (node name, node function)
 _TOOL_NODES: dict[str, tuple[str, callable]] = {
     "sql":        ("sql_node",        sql_node),
+    "mcp_sql":    ("mcp_sql_node",    mcp_sql_node),
     "rag":        ("rag_node",        rag_node),
     "web_search": ("web_search_node", web_search_node),
 }

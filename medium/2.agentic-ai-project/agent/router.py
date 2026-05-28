@@ -15,20 +15,30 @@ from config import (
     LLM_MODEL,
     LLM_TEMPERATURE,
     ANTHROPIC_API_KEY,
+    MCP_SQL_PREFER,
     ROUTES,
 )
 from observability import trace
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-ROUTER_SYSTEM = """\
+_BASE_ROUTER_SYSTEM = """\
 당신은 이커머스 분석 어시스턴트의 라우팅 에이전트입니다.
 사용자 메시지와 대화 이력을 보고, 어떤 도구를 사용할지 결정해야 합니다.
 
 [사용 가능한 도구]
-  sql        — 데이터베이스에 저장된 정보를 묻는 경우 사용합니다.
+  sql        — 데이터베이스에 저장된 정보를 묻는 일반적인 경우 사용합니다.
                예) 주문, 주문 항목, 고객, 결제, 상품, 매출, 집계/카운트,
                    추세 분석, 특정 주문/고객 조회 등 정형 이커머스 데이터.
+
+  mcp_sql    — MCP(Model Context Protocol) 서버를 통한 SQL 실행이 필요한 경우 사용합니다.
+               sql 과 동일한 DB 를 가리키지만, 별도 MCP 서버 경로로 호출됩니다.
+               다음 조건 중 하나라도 해당하면 sql 대신 mcp_sql 을 선택하세요:
+                 • 사용자가 "MCP로", "MCP 도구로", "MCP 서버로" 등 명시적으로 요구
+                 • 스키마 탐색, 테이블 구조 조회, 샘플 데이터 미리보기 요청
+                   예) "어떤 테이블이 있어?", "orders 테이블 구조 보여줘", "샘플 행 5개"
+                 • 외부 클라이언트(Claude Desktop 등)와 동일 결과 재현이 필요한 경우
+               {prefer_hint}그 외 일반적인 집계/분석 질의는 기존 sql 을 사용합니다.
 
   rag        — 업로드된 문서(PDF)에서 정보를 찾아야 하는 경우 사용합니다.
                예) 정책, 매뉴얼, 문서, FAQ 등. 업로드된 PDF가 없어도
@@ -42,11 +52,18 @@ ROUTER_SYSTEM = """\
 
 [출력 형식]
 반드시 아래 JSON 형식만 출력하세요 (다른 텍스트 금지):
-{
-  "route": "<sql|rag|web_search>",
+{{
+  "route": "<sql|mcp_sql|rag|web_search>",
   "reason": "<한 문장으로 선택 이유 설명>"
-}
+}}
 """
+
+_PREFER_HINT = (
+    "* 운영 모드 안내: 동률(sql vs mcp_sql)일 경우 mcp_sql 을 우선 선택하세요.\n               "
+    if MCP_SQL_PREFER else ""
+)
+
+ROUTER_SYSTEM = _BASE_ROUTER_SYSTEM.format(prefer_hint=_PREFER_HINT)
 
 
 @trace(span_type="PARSER", model=LLM_MODEL)

@@ -45,4 +45,7 @@ WEB_SEARCH_TIMEOUT = 10     # seconds
 
 # ── Routing ───────────────────────────────────────────────────────────────────
 # The router LLM call picks one of these exact route names
-ROUTES = ["sql", "rag", "web_search"]
+ROUTES = ["sql", "mcp_sql", "rag", "web_search"]
+
+# 동률(sql vs mcp_sql) 시 mcp_sql 을 선호할지 토글. 환경변수로 운영 중 전환 가능.
+MCP_SQL_PREFER = os.getenv("MCP_SQL_PREFER", "false").lower() == "true"
