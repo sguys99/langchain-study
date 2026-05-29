@@ -24,7 +24,7 @@ def mentions_officeflow(outputs: dict) -> bool:
 # - evaluators: 각 출력에 적용할 평가자 목록
 # 실행 결과는 LangSmith 대시보드에서 확인.
 results = evaluate(
-    target = dummy_app,
+    dummy_app,
     data="officeflow-dataset",
     evaluators=[mentions_officeflow]
 )
