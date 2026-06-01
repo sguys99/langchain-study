@@ -343,27 +343,29 @@ uv run python -m tools.rag_tool --force      # 강제 재빌드
 가시성 측면에서는 `@trace(span_type="PARSER", model=LLM_MODEL)` 데코레이터가 라우터 호출을 MLflow 스팬으로 자동 기록함. 
 
 #### 7.3 LangGraph Nodes
-nodes.py 모듈은 파이프라인의 핵심 실행 로직을 정의하며, 각 노드는 라우팅, 도구 호출 또는 응답 생성이라는 특정 단계를 수행하는 동시에 그래프를 통해 상태를 전달합니다.
+nodes.py 모듈은 파이프라인의 핵심 실행 로직을 정의하며, 각 노드는 라우팅, 도구 호출 또는 응답 생성이라는 특정 단계를 수행하는 동시에 그래프를 통해 상태를 전달.
 
-이러한 노드들은 서로 결합되어 모듈식이며 관찰 가능한 워크플로를 형성하며, 이를 통해 SQL, RAG 및 웹 검색 경로에 걸쳐 동적인 의사 결정을 가능하게 합니다.
+이러한 노드들은 서로 결합되어 모듈식/ 관찰 가능한 워크플로를 형성하며, 이를 통해 SQL, RAG 및 웹 검색 경로에 걸쳐 동적인 의사 결정을 가능하게 gka.
 
-- router_node()는 route_question()을 호출하여 sql, rag 또는 web_search 중 하나를 선택합니다.
+- router_node()는 route_question() 함수를 호출하여 sql, rag 또는 web_search 중 하나를 선택.
 
-- sql_node()는 run_sql_tool()을 호출합니다.
+- sql_node()는 run_sql_tool()을 호출.
 
-- rag_node()는 run_rag_tool()을 호출합니다.
+- mcp_sql_node()는 run_mcp_sql_tool()을 호출.
 
-- web_search_node()는 `run_web_search_tool()`을 호출합니다.
+- rag_node()는 run_rag_tool()을 호출.
 
-- synthesise_node()는 LLM을 사용하여 최종 답변을 생성합니다.
+- web_search_node()는 `run_web_search_tool()`을 호출합.
 
-- update_history_node()는 해당 턴을 기록에 추가합니다.
+- synthesise_node()는 LLM을 사용하여 최종 답변을 생성.
+
+- update_history_node()는 해당 턴을 기록에 추가.
 
 #### 7.4 LangGraph Graph
-graph.py 모듈은 LangGraph의 전체 워크플로를 정의하며, 모든 노드를 조건부 실행 그래프로 연결하여 최종 응답을 생성하기 전에 사용자 쿼리를 SQL, RAG 또는 웹 검색 경로를 통해 동적으로 라우팅합니다.
+graph.py 모듈은 LangGraph의 전체 워크플로를 정의하며, 모든 노드를 조건부 실행 그래프로 연결하여 최종 응답을 생성하기 전에 사용자 쿼리를 SQL, RAG 또는 웹 검색 경로를 통해 동적으로 라우팅.
 
 - 라우터의 결정에 따라 쿼리를 올바른 도구 노드로 안내하는 조건부 라우팅 로직을 구현합니다.
-- 라우팅 → 도구 실행 → 응답 생성 → 대화 기록 업데이트에 이르는 전체 파이프라인 흐름을 조정합니다.
+- 라우팅 → 도구 실행 → 응답 생성 → 대화 기록 업데이트에 이르는 전체 파이프라인 흐름을 조정함.
 
 ![](img/3.png)
 
