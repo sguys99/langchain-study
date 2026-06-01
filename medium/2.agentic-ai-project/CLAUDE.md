@@ -38,7 +38,7 @@ uv run main.py --demo    # 3턴 스크립트 데모 (SQL / Web / RAG 한 번씩)
 router_node
   │
   ├── "sql"        ──▶ sql_node        ──┐
-  ├── "mcp_sql"    ──▶ mcp_sql_node    ──┤   (※ 현재 미구현 — Gotchas 참조)
+  ├── "mcp_sql"    ──▶ mcp_sql_node    ──┤
   ├── "rag"        ──▶ rag_node        ──┤
   └── "web_search" ──▶ web_search_node ──┤
                                           ▼
@@ -75,7 +75,7 @@ router_node
 - **임베딩 기본값**: 상용 Voyage AI `voyage-4-lite` (config.py:25). 로컬 폴백이 필요하면 `config.py`에서 `EMBEDDING_MODEL`을 `sentence-transformers/all-MiniLM-L6-v2`로 교체 (주석으로 남겨져 있음). [tools/rag_tool.py](tools/rag_tool.py)가 모델 이름으로 provider를 자동 판별.
 - **LLM 기본값**: `claude-sonnet-4-6`, temperature 0.0, max_tokens 1024 (config.py:19-21).
 - **라우트 키**: `ROUTES = ["sql", "mcp_sql", "rag", "web_search"]` (config.py:48). 새 라우트 추가 시 반드시 [agent/graph.py](agent/graph.py)의 `_TOOL_NODES` 딕셔너리도 함께 갱신할 것 — 그래프 토폴로지의 단일 진실.
-- **`mcp_sql_node`는 현재 `pass` 스텁** ([agent/nodes.py](agent/nodes.py) 참조). 라우터가 `mcp_sql`을 선택해도 결과 슬롯이 비어 합성 단계에서 빈 답이 나올 수 있음. MCP SQL 경로로 실험하려면 이 노드를 실제 MCP 클라이언트 호출로 구현해야 함.
+- **`mcp_sql_node` 구현 완료** ([agent/nodes.py](agent/nodes.py) 참조). [tools/mcp_sql_tool.py](tools/mcp_sql_tool.py)의 `run_mcp_sql_tool`을 호출해 MCP SQLite 서버를 거쳐 SQL을 실행하고 결과를 `state["mcp_sql_result"]`에 저장. `mcp_tool_calls` 수도 함께 로깅하므로 직접 sqlite 경로(`sql_node`)와 비교 디버깅에 활용 가능.
 - **데이터 아티팩트 누락 시 즉시 종료**: [main.py](main.py)의 `_check_env()`가 `data/ecommerce.db`와 `data/faiss_index/index.faiss` 존재를 확인. 없으면 `uv run setup.py`를 먼저 실행.
 - **MLflow 추적**: HTTP URI인 경우 [observability.py](observability.py)가 사전 소켓 프로브를 수행해 서버 미기동 시 빠르게 폴백 (urllib3 재시도로 수십 초 멈추는 것을 방지).
 - **`@trace` 자동 캡처**: `cost.usd`, `tokens.input/output`, `bytes.input/output`, `duration_ms` 그리고 결과 dict에서 `sql`/`chunks`/`results`/`sources`를 자동 추출. 새 LLM·임베딩 모델 추가 시 [observability.py](observability.py)의 `MODEL_PRICING` 테이블에 단가도 함께 등록해야 비용이 정확히 산출됨.
