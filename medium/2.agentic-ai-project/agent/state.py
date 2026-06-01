@@ -1,30 +1,30 @@
 # agent/state.py
 # ─────────────────────────────────────────────────────────────────────────────
-# LangGraph state definition.
-# All fields flow through the graph; nodes read what they need and return
-# only the keys they update.
+# LangGraph 상태 정의.
+# 모든 필드는 그래프를 통해 흐르며, 각 노드는 필요한 키만 읽고
+# 업데이트할 키만 반환합니다.
 # ─────────────────────────────────────────────────────────────────────────────
 
 from typing import TypedDict, Optional, Any
 
 
 class AgentState(TypedDict):
-    # ── Input ─────────────────────────────────────────────────────────────────
+    # ── 입력 ──────────────────────────────────────────────────────────────────
     user_message: str
     conversation_history: list[dict]   # [{"role": "user"|"assistant", "content": str}]
 
-    # ── Routing ───────────────────────────────────────────────────────────────
+    # ── 라우팅 ────────────────────────────────────────────────────────────────
     route:        str                  # "sql" | "mcp_sql" | "rag" | "web_search"
-    route_reason: str                  # explanation from the router LLM
+    route_reason: str                  # 라우터 LLM의 판단 근거
 
-    # ── Tool outputs (only one will be populated per turn) ───────────────────
+    # ── 도구 출력 (턴 당 하나의 슬롯만 채워짐) ────────────────────────────────
     sql_result:        Optional[dict]  # {sql, rows, table_md, error}
     mcp_sql_result:    Optional[dict]  # {sql, rows, table_md, error, mcp_tool_calls}
     rag_result:        Optional[dict]  # {answer, chunks, sources}
     web_search_result: Optional[dict]  # {answer, results, query}
 
-    # ── Final synthesised answer ──────────────────────────────────────────────
+    # ── 최종 합성 답변 ────────────────────────────────────────────────────────
     final_answer: str
 
-    # ── Turn metadata ─────────────────────────────────────────────────────────
+    # ── 턴 메타데이터 ─────────────────────────────────────────────────────────
     turn_number:  int
