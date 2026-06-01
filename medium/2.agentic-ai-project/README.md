@@ -378,7 +378,7 @@ graph.py 모듈은 LangGraph의 전체 워크플로를 정의하며, 모든 노�
 
 setup.py 파일 참고할 것
 
-다음 명령을 입력하면 저장소 내에 데이터셋 data/ecommerce.db와 벡터 데이터베이스용 data/faiss_index/index.faiss 파일이 생성됩니다.
+다음 명령을 입력하면 저장소 내에 데이터셋 data/ecommerce.db와 벡터 데이터베이스용 data/faiss_index/index.faiss 파일이 생성됨.
 
 ```
 uv run setup.py
