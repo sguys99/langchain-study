@@ -29,10 +29,10 @@ def router_node(state: dict) -> dict:
         user_message=state["user_message"],
         conversation_history=state["conversation_history"],
     )
-    print(f"\n[router] → {routing['route'].upper()}  |  {routing['reason']}")
+    print(f"\n[router] → {routing.route.upper()}  |  {routing.reason}")
     return {
-        "route":        routing["route"],
-        "route_reason": routing["reason"],
+        "route":        routing.route,
+        "route_reason": routing.reason,
     }
 
 
