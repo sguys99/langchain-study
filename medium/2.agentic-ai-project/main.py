@@ -105,7 +105,7 @@ def run_demo(session: EcommerceSession) -> None:
     # 주석 처리된 질문들은 추가 검증이 필요할 때 활성화하여 확장 테스트 가능.
     demo_turns = [
         # ── SQL 쿼리: 구조화된 데이터(SQLite) 집계 ─────────────────────────────
-        "How many orders were delivered successfully?",
+        "배송이 완료된 주문(order)은 몇건입니까?",
         #"What are the top 5 customer states by total number of orders?",
         #"What is the average payment value for credit card transactions?",
         #"Show me the top 5 product categories by total revenue.",
@@ -116,15 +116,15 @@ def run_demo(session: EcommerceSession) -> None:
         #"Now show me those same categories but only for delivered orders.",
 
         # ── 웹 검색: 최신 정보가 필요한 질문 (Serper API 사용) ─────────────────
-        "What are the latest e-commerce trends in Brazil for 2024?",
+        "2026년 대한민국의 최신 e-commerce 트렌드는 무엇인가요?",
 
         # ── RAG: 사내 PDF 문서(반품 정책 등) 검색 ──────────────────────────────
-        "What does our return policy say about electronics?",
+        "가전 제품(electronics)의 반품 정책(return policy)에 대해서 알려주세요.",
     ]
 
     # ── 헤더 출력 ─────────────────────────────────────────────────────────────
     print("\n" + "═" * 60)
-    print("  DEMO MODE — Scripted Multi-Turn Conversation")
+    print("  데모모드 — Scripted Multi-Turn Conversation")
     print("═" * 60)
 
     # ── 각 턴을 순차 실행 ─────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ def run_demo(session: EcommerceSession) -> None:
 
     # ── 종료 메시지 + 전체 대화 이력 덤프 ─────────────────────────────────────
     print("\n" + "═" * 60)
-    print("  Demo complete.")
+    print("  데모 종료.")
     print("═" * 60)
     session.print_history()  # 누적된 모든 turn의 user/assistant 메시지 출력
 
@@ -236,7 +236,7 @@ def main() -> None:
     print(f"[main] Session ID: {session.session_id}")
 
     # 컴파일된 그래프 토폴로지를 PNG(agent_graph.png)로 저장 — 디버깅/문서화 용도
-    save_graph_visualization(session.graph)
+    # save_graph_visualization(session.graph)
 
     # ── 5) 실행 모드 분기 ─────────────────────────────────────────────────────
     if args.demo:
