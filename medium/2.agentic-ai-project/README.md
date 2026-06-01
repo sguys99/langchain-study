@@ -392,6 +392,14 @@ main.py 파일은 애플리케이션의 진입점 역할을 하며, 세션을 �
 
 
 ### 10. session.py
+session.py 파일은 컴파일된 LangGraph 에이전트를 감싸는 `EcommerceSession` 클래스를 제공   
+LangGraph 그래프 자체가 stateless 단일 호출 단위라는 한계를 외부 상태 관리로 보완   
+(추후 방법 변경 필요)
+
+- 세션 생성 시 `build_graph()`를 1회만 호출하여 컴파일된 그래프를 재사용하고, 8자리 `session_id`를 발급해 MLflow 트레이스에서 세션 단위 묶음으로 식별 가능.
+- `ask()`는 사용자 질문 1건을 받아 `conversation_history`와 함께 초기 `AgentState`를 구성한 뒤 그래프를 `invoke()`하고, 갱신된 이력과 최종 답변을 반환 → 이전 턴의 맥락을 다음 턴이 자연스럽게 참조.
+- 매 턴 전체를 `turn_N` MLflow 부모 스팬(`CHAIN` 타입)으로 감싸므로, router/tool/synthesise 자식 스팬들이 하나의 트레이스 트리로 묶여 종단 간 지연 시간·비용을 한눈에 확인 가능.
+- 보조 메서드로 `reset()`(이력 초기화), `get_history()`(방어적 복사본 반환), `print_history()`(콘솔 덤프)를 제공하여 [main.py](main.py)의 REPL 명령(`reset`, `history`)과 데모 모드 종료 시 사용됨.
 
 
 ### 11. Running the Application
