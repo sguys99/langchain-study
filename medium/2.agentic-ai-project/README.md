@@ -338,9 +338,9 @@ uv run python -m tools.rag_tool --force      # 강제 재빌드
 #### 7.1 Defining the Agent State
 
 #### 7.2 Router
-라우터는 추론 기능을 갖춘 LLM 기반 분류기를 사용하여 각 사용자 쿼리를 적절한 경로(SQL, RAG 또는 웹 검색)로 라우팅합니다.
+라우터는 LLM 기반 분류기로 각 사용자 쿼리를 네 가지 경로(`sql`, `mcp_sql`, `rag`, `web_search`) 중 하나로 분류함. 구현은 Anthropic SDK 의 **structured output** 을 사용함.
 
-로깅을 위해 @trace(span_type=“PARSER”, model="...") 데코레이터를 추가하고, 함수 내에서는 span = mlflow.get_current_active_span()을 통해 스팬을 지정했다는 점에 유의하십시오.
+가시성 측면에서는 `@trace(span_type="PARSER", model=LLM_MODEL)` 데코레이터가 라우터 호출을 MLflow 스팬으로 자동 기록함. 
 
 #### 7.3 LangGraph Nodes
 nodes.py 모듈은 파이프라인의 핵심 실행 로직을 정의하며, 각 노드는 라우팅, 도구 호출 또는 응답 생성이라는 특정 단계를 수행하는 동시에 그래프를 통해 상태를 전달합니다.
