@@ -334,9 +334,9 @@ Query → Embedding → Vector DB → Top-k Chunks → LLM → Answer
 
 1. **구조화된 마크다운 추출**
 - 레이아웃과 제목을 보존하기 위해 pymupdf4llm.to_markdown()을 사용
-1. **헤더를 기반으로 계층 구조 구축**
+2. **헤더를 기반으로 계층 구조 구축**
 - 마크다운 헤더는 레벨로 파싱되며, 스택 기반 접근 방식을 사용하여 트리를 구성.
-1. **콘텐츠를 페이지와 정렬**
+3. **콘텐츠를 페이지와 정렬**
 - 페이지 단위 청크를 사용하여 페이지 경계를 정교화하고 각 노드가 원본 문서에 정확하게 매핑되도록 보장
 
 추가 사항:
@@ -349,4 +349,143 @@ Query → Embedding → Vector DB → Top-k Chunks → LLM → Answer
 
 ```
 tree.py 파일 참고
+```
+
+### Step 2: Retrieval (트리 네비게이션)
+
+구조화된 DocumentTree가 준비되면 다음 단계는 검색이다. 
+
+일회성 조회를 수행하는 대신, 모델이 다음으로 이동할 위치를 결정하도록 하여 트리를 단계별로 탐색한다.
+
+이는 langgraph를 사용한 에이전트 기반 탐색 루프로 구현되며, 각 단계에서는 현재 노드를 분석하여 다음 중 하나를 결정한다:
+
+- 현재 노드에서 콘텐츠를 검색하거나,
+- 자식 노드 중 하나로 하향 이동합니다
+
+#### 핵심 개념
+
+검색은 트리에 대한 의사결정 과정으로 간주된다:
+
+- 루트에서 시작
+- 각 노드에서 쿼리와의 관련성을 평가
+- 다음 중 하나를 선택:
+    - 중지하고 콘텐츠를 추출하거나,
+    - 더 관련성이 높은 하위 섹션으로 더 깊이 이동
+
+이는 중지 조건(낮은 신뢰도, 최대 깊이, 또는 리프 노드)이 충족될 때까지 계속된다.
+
+#### 구현 구성 요소
+
+검색 파이프라인은 다음 네 가지 주요 단계로 구성된 그래프로 구축된다:
+
+1. 분석 (LLM 기반 의사결정)
+모델은 다음 정보를 입력받는다:
+    - 쿼리
+    - 현재 노드 (제목, 요약, 콘텐츠 미리보기)
+    - 자식 노드 목록
+    
+    모델은 다음을 리턴한다:
+    
+    - 신뢰도 점수
+    - 하위로 이동할지 여부
+    - 다음에 탐색할 자식 노드
+    - 간략한 추론
+2. 하위 탐색 (트리 탐색, tree traversal)
+선택된 자식 노드로 이동하여 과정을 반복
+3. 검색(콘텐츠 추출)
+트래버스가 중단되면 시스템은 페이지 메타데이터와 함께 현재 노드에서 콘텐츠를 추출.
+4. 생성(최종 답변)
+검색된 섹션은 모델로 전달되어 인용 출처가 포함된 근거 기반 답변을 생성합니다.
+
+#### 실행 흐름
+
+```python
+Question
+   ↓
+[Step 1] Analyze Node      ← LLM evaluates relevance and decides next action
+   ↓
+[Step 2] Route Decision    ← Descend into children, retrieve content, or backtrack
+   ↓
+[Step 3] Retrieve Content  ← Extract full text from relevant nodes
+   ↓
+[Step 4] Generate Answer   ← LLM synthesizes final answer with sources
+   ↓
+Answer + Path + Confidence + Sources
+```
+
+각 단계(step)에서는 다음을 포함한 정보가 로깅된다:
+
+- 탐색 경로(Traversal path)
+- 각 노드에서 내린 결정(Decisions made at each node)
+- 신뢰도 점수(Confidence scores)
+- 최종적으로 사용된 출처(Final sources used)
+
+이를 통해 블랙박스 검색 시스템과 달리 검색 과정이 완전히 투명해지고 디버깅이 가능해짐
+
+#### 주요 특징
+
+- 검색은 일회성이 아닌 반복적으로 수행
+- 결정은 명시적이며 검토 가능함
+- 탐색은 구조와 추론을 기반으로 안내됨
+- 시스템은 광범위한 블록 대신 관련성 높은 하위 섹션에 자연스럽게 집중함
+
+```python
+retriever.py 파일 참고
+```
+
+### main.py 구현하기
+
+다음 명령 실행
+
+```python
+uv run main.py
+```
+
+가장 먼저 pymupdf4llm을 사용해서 pdf로부터 텍스트를 추출한다.
+
+다음과 같은 형태일 것이다.
+
+```python
+{
+  "document_name": "bigtable-osdi06",
+  "root": {
+    "id": "root",
+    "title": "bigtable-osdi06.pdf",
+    "level": 0,
+    "page_start": 1,
+    "page_end": 13,
+    "content": "",
+    "children": [
+      {
+        "id": "Bigtable_A_Distribut_0",
+        "title": "**Bigtable: A Distributed Storage System for Structured Data**",
+        "level": 1,
+        "page_start": 1,
+        "page_end": 13,
+        "content": "\n\nFay Chang, Jeffrey Dean, Sanjay Ghemawat, Wilson C. Hsieh, Deborah A. Wallach Mike Burrows, Tushar Chandra, Andrew Fikes, Robert E. Gruber \n\@google.com">n{fay,jeff,sanjay,wilsonh,kerr,m3b,tushar,fikes,gruber}@google.com \n\n_Google, Inc._",
+        "children": [
+          {
+            "id": "Abstract_8",
+            "title": "**Abstract**",
+            "level": 2,
+            "page_start": 1,
+            "page_end": 1,
+            "content": "\n\nBigtable is a distributed storage system for managing structured data that is designed to scale to a very large size: petabytes of data across thousands of commodity servers. Many projects at Google store data in Bigtable, including web indexing, Google Earth, and Google Finance. These applications place very different demands on Bigtable, both in terms of data size (from URLs to web pages to satellite imagery) and latency requirements (from backend bulk processing to real-time data serving). Despite these varied demands, Bigtable has successfully provided a flexible, high-performance solution for all of these Google products. In this paper we describe the simple data model provided by Bigtable, which gives clients dynamic control over data layout and format, and we describe the design and implementation of Bigtable.",
+            "children": [],
+            "heading_type": "unknown",
+            "summary": "Bigtable is a distributed storage system for managing structured data that is designed to scale to a very large size: petabytes of data across thousands of commodity servers. Many projects at Google store data in Bigtable, including web indexing, Google Earth, and Google Finance. These applications "
+          },
+          {
+            "id": "1_Introduction_12",
+            "title": "**1 Introduction**",
+            "level": 2,
+            "page_start": 1,
+            "page_end": 1,
+            "content": "\n\nOver the last two and a half years we have designed, implemented, and deployed a distributed storage system for managing structured data at Google called Bigtable. Bigtable is designed to reliably scale to petabytes of data and thousands of machines. Bigtable has achieved several goals: wide applicability, scalability, high performance, and high availability. Bigtable is used by more than sixty Google products and projects, including Google Analytics, Google Finance, Orkut, Personalized Search, Writely, and Google Earth. These products use Bigtable for a variety of demanding workloads, which range from throughput-oriented batch-processing jobs to latency-sensitive serving of data to end users. The Bigtable clusters used by these products span a wide range of configurations, from a handful to thousands of servers, and store up to several hundred terabytes of data. \n\nIn many ways, Bigtable resembles a database: it shares many implementation strategies with databases. Parallel databases [14] and main-memory databases [13] have \n\nachieved scalability and high performance, but Bigtable provides a different interface than such systems. Bigtable does not support a full relational data model; instead, it provides clients with a simple data model that supports dynamic control over data layout and format, and allows clients to reason about the locality properties of the data represented in the underlying storage. Data is indexed using row and column names that can be arbitrary strings. Bigtable also treats data as uninterpreted strings, although clients often serialize various forms of structured and semi-structured data into these strings. Clients can control the locality of their data through careful choices in their schemas. Finally, Bigtable schema parameters let clients dynamically control whether to serve data out of memory or from disk. \n\nSection 2 describes the data model in more detail, and Section 3 provides an overview of the client API. Section 4 briefly describes the underlying Google infrastructure on which Bigtable depends. Section 5 describes the fundamentals of the Bigtable implementation, and Section 6 describes some of the refinements that we made to improve Bigtable\u2019s performance. Section 7 provides measurements of Bigtable\u2019s performance. We describe several examples of how Bigtable is used at Google in Section 8, and discuss some lessons we learned in designing and supporting Bigtable in Section 9. Finally, Section 10 describes related work, and Section 11 presents our conclusions.",
+            "children": [],
+            "heading_type": "unknown",
+            "summary": "Over the last two and a half years we have designed, implemented, and deployed a distributed storage system for managing structured data at Google called Bigtable. Bigtable is designed to reliably scale to petabytes of data and thousands of machines. Bigtable has achieved several goals: wide applica"
+          },
+
+}
 ```
