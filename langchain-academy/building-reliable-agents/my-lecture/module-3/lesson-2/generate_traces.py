@@ -1,13 +1,19 @@
-"""Generate 1000 synthetic traces for OfficeFlow Supply Co. customer support.
+"""OfficeFlow Supply Co. 고객 지원용 합성 trace 1000건을 생성하는 스크립트.
 
-Produces synthetic_traces.json with 1000 traces (200 per category):
-  - inventory: product stock/availability questions
-  - policy: company policy questions (returns, shipping, etc.)
-  - out_of_scope: things Emma can't help with
-  - both: inventory AND policy in one message
-  - website_troubleshooting: website/portal issues
+synthetic_traces.json 파일에 1000개의 trace(카테고리당 200건)를 생성한다.
+  - inventory          : 상품 재고/취급 여부 질문
+  - policy             : 회사 정책 관련 질문 (반품, 배송 등)
+  - out_of_scope       : Emma가 도와줄 수 없는 범위 외 질문
+  - both               : 한 메시지에 inventory + policy 가 같이 들어 있는 경우
+  - website_troubleshooting : 웹사이트/포털 사용 중 발생한 문제
 
-Each trace = 2 runs: root "Emma" chain + child "ChatOpenAI" llm.
+각 trace 는 최소 2개의 run으로 구성된다:
+  - 루트 "Emma" chain run
+  - 자식 "ChatAnthropic" llm run (필요 시 tool call run 추가)
+
+[모델] 이 데이터셋은 Anthropic Claude(claude-haiku-4-5) 호출을 기준으로 한
+합성 trace 다. (LangSmith trace 구조는 OpenAI chat completion 포맷을
+그대로 따른다. ls_provider 만 "anthropic"으로 표기.)
 """
 
 import json
@@ -16,259 +22,280 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 # ---------------------------------------------------------------------------
-# Constants
+# \uc0c1\uc218 \uc815\uc758
 # ---------------------------------------------------------------------------
+# \ud2b8\ub808\uc774\uc2a4 \uce74\ud14c\uace0\ub9ac 5\uc885. \uac01 \uce74\ud14c\uace0\ub9ac\ubcc4\ub85c TRACES_PER_CATEGORY \ub9cc\ud07c \uc0dd\uc131\ud55c\ub2e4.
 CATEGORIES = ["inventory", "policy", "out_of_scope", "both", "website_troubleshooting"]
-TRACES_PER_CATEGORY = 200
-OUTPUT_FILE = "synthetic_traces.json"
+TRACES_PER_CATEGORY = 200          # \uce74\ud14c\uace0\ub9ac\ub2f9 trace \uac1c\uc218 (\ucd1d 1000\uac74)
+OUTPUT_FILE = "synthetic_traces.json"   # \uacb0\uacfc JSON \ud30c\uc77c\uba85
 
+# Emma \uc5d0\uc774\uc804\ud2b8\uc758 \uc2dc\uc2a4\ud15c \ud504\ub86c\ud504\ud2b8(\ud55c\uad6d\uc5b4). LLM run\uc758 messages[0] \ub85c \ub4e4\uc5b4\uac04\ub2e4.
+# \uc774 \ud504\ub86c\ud504\ud2b8\ub294 Emma \uc758 \uc5ed\ud560/\ucc45\uc784/\ud55c\uacc4\ub97c \uc815\uc758\ud558\uba70, \ubaa8\ub4e0 trace \uc5d0\uc11c \ub3d9\uc77c\ud558\uac8c \uc0ac\uc6a9\ub41c\ub2e4.
 SYSTEM_PROMPT = (
-    "You are Emma, a customer support specialist for OfficeFlow Supply Co., "
-    "a paper and office supplies distribution company serving small-to-medium "
-    "businesses across North America.\n\nABOUT YOUR ROLE:\nYou're part of the "
-    "Customer Experience team and have been with OfficeFlow for 3 years. You're "
-    "known for being helpful, efficient, and genuinely caring about solving "
-    "customer problems. Your manager emphasizes that every interaction is an "
-    "opportunity to build trust and loyalty.\n\nWHAT YOU CAN HELP WITH:\n"
-    "\u2713 Product Information - Answer questions about our catalog of office "
-    "supplies, paper products, writing instruments, organizational tools, and "
-    "desk accessories\n\u2713 Inventory & Availability - Check current stock "
-    "levels and help customers find what they need\n\u2713 Product Recommendations "
-    "- Suggest products based on customer needs, usage patterns, and budget\n"
-    "\u2713 General Inquiries - Handle questions about our company, product lines, "
-    "and services\n\nWHAT YOU CANNOT DIRECTLY HANDLE:\n\u2717 Order Placement - "
-    "While you can provide product info, actual ordering is done through our web "
-    "portal or by contacting our sales team at sales@officeflow.com\n\u2717 Order "
-    "Status & Tracking - Direct customers to check their account portal or contact "
-    "fulfillment@officeflow.com\n\u2717 Returns & Refunds - These require approval "
-    "from our Returns Department at returns@officeflow.com\n\u2717 Account Changes "
-    "- Billing, payment methods, and account settings must go through "
-    "accounts@officeflow.com\n\u2717 Technical Support - For website issues, direct "
-    "to support@officeflow.com"
+    "\ub2f9\uc2e0\uc740 OfficeFlow Supply Co.\uc758 \uace0\uac1d \uc9c0\uc6d0 \uc804\ubb38\uac00 'Emma' \uc785\ub2c8\ub2e4. "
+    "OfficeFlow Supply Co.\ub294 \uad6d\ub0b4 \uc911\uc18c\uae30\uc5c5\uc744 \ub300\uc0c1\uc73c\ub85c \uc885\uc774 \ubc0f \uc0ac\ubb34\uc6a9\ud488\uc744 "
+    "\uc720\ud1b5\ud558\ub294 \ud68c\uc0ac\uc785\ub2c8\ub2e4.\n\n"
+    "[\ub2f9\uc2e0\uc758 \uc5ed\ud560]\n"
+    "\ub2f9\uc2e0\uc740 \uace0\uac1d \uacbd\ud5d8(Customer Experience) \ud300 \uc18c\uc18d\uc774\uba70 OfficeFlow \uc5d0\uc11c "
+    "3\ub144\uc9f8 \uadfc\ubb34\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4. \ub2f9\uc2e0\uc740 \uce5c\uc808\ud558\uace0 \ud6a8\uc728\uc801\uc774\uba70, \uace0\uac1d\uc758 \ubb38\uc81c\ub97c "
+    "\uc9c4\uc2ec\uc73c\ub85c \ud574\uacb0\ud574 \uc8fc\ub294 \uc0ac\ub78c\uc73c\ub85c \uc54c\ub824\uc838 \uc788\uc2b5\ub2c8\ub2e4. \ub9e4\ub2c8\uc800\ub294 \ubaa8\ub4e0 \uc0c1\ub2f4\uc774 "
+    "\uace0\uac1d\uc758 \uc2e0\ub8b0\uc640 \ucda9\uc131\ub3c4\ub97c \uc313\uc744 \uae30\ud68c\uc784\uc744 \ud56d\uc0c1 \uac15\uc870\ud569\ub2c8\ub2e4.\n\n"
+    "[\ub2f9\uc2e0\uc774 \ub3c4\uc640\uc904 \uc218 \uc788\ub294 \uc77c]\n"
+    "\u2713 \uc0c1\ud488 \uc815\ubcf4 \uc548\ub0b4 - \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ud544\uae30\uad6c, \uc815\ub9ac\uc6a9\ud488, \ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac "
+    "\ub4f1 \uce74\ud0c8\ub85c\uadf8\uc5d0 \ub300\ud55c \ubb38\uc758 \ub2f5\ubcc0\n"
+    "\u2713 \uc7ac\uace0 \ubc0f \ucde8\uae09 \uc5ec\ubd80 \ud655\uc778 - \ud604\uc7ac \uc7ac\uace0\ub97c \uc870\ud68c\ud558\uc5ec \uace0\uac1d\uc774 \uc6d0\ud558\ub294 \uc0c1\ud488\uc744 "
+    "\ucc3e\ub3c4\ub85d \ub3c4\uc6c0\n"
+    "\u2713 \uc0c1\ud488 \ucd94\ucc9c - \uace0\uac1d\uc758 \ud544\uc694, \uc0ac\uc6a9 \ud328\ud134, \uc608\uc0b0\uc5d0 \ub9de\ub294 \uc0c1\ud488 \ucd94\ucc9c\n"
+    "\u2713 \uc77c\ubc18 \ubb38\uc758 \uc751\ub300 - \ud68c\uc0ac, \uc0c1\ud488 \ub77c\uc778\uc5c5, \uc11c\ube44\uc2a4 \uad00\ub828 \uc77c\ubc18 \uc9c8\ubb38 \uc751\ub300\n\n"
+    "[\ub2f9\uc2e0\uc774 \uc9c1\uc811 \ucc98\ub9ac\ud560 \uc218 \uc5c6\ub294 \uc77c]\n"
+    "\u2717 \uc8fc\ubb38 \uc811\uc218 - \uc0c1\ud488 \uc815\ubcf4 \uc81c\uacf5\uc740 \uac00\ub2a5\ud558\uc9c0\ub9cc, \uc2e4\uc81c \uc8fc\ubb38\uc740 \uc6f9 \ud3ec\ud138 \ub610\ub294 "
+    "\uc601\uc5c5\ud300(sales@officeflow.com)\uc744 \ud1b5\ud574 \uc9c4\ud589\ub429\ub2c8\ub2e4.\n"
+    "\u2717 \uc8fc\ubb38 \uc0c1\ud0dc \ud655\uc778 \ubc0f \ubc30\uc1a1 \uc870\ud68c - \uace0\uac1d \ud3ec\ud138 \ub610\ub294 fulfillment@officeflow.com "
+    "\uc73c\ub85c \uc548\ub0b4\ud569\ub2c8\ub2e4.\n"
+    "\u2717 \ubc18\ud488 \ubc0f \ud658\ubd88 - \ubc18\ud488\ud300(returns@officeflow.com)\uc758 \uc2b9\uc778\uc774 \ud544\uc694\ud569\ub2c8\ub2e4.\n"
+    "\u2717 \uacc4\uc815 \ubcc0\uacbd - \uacb0\uc81c \uc815\ubcf4, \uacb0\uc81c \uc218\ub2e8, \uacc4\uc815 \uc124\uc815\uc740 "
+    "accounts@officeflow.com \uc73c\ub85c \uc548\ub0b4\ud569\ub2c8\ub2e4.\n"
+    "\u2717 \uae30\uc220 \uc9c0\uc6d0 - \uc6f9\uc0ac\uc774\ud2b8 \uad00\ub828 \ubb38\uc81c\ub294 support@officeflow.com \uc73c\ub85c \uc548\ub0b4\ud569\ub2c8\ub2e4."
 )
 
+# 상품 카탈로그 (template의 {product}, {product2}, {product3} 자리에 들어감).
+# 한국 사무환경에서 자주 쓰이는 사무용품 중심으로 구성.
 PRODUCTS = [
-    "Copy Paper 500 Sheets", "Blue Ballpoint Pens (12-pack)",
-    "Stapler with Staples", "Spiral Notebooks (3-pack)",
-    "Manila File Folders (25-pack)", "Sticky Notes (4-pack)",
-    "Dry Erase Markers (8-pack)", "Paper Clips (100-pack)",
-    "Binder Clips (24-pack)", "Legal Pads (6-pack)",
-    "Highlighters (5-pack)", "Desk Organizer Tray",
-    "Correction Tape (3-pack)", "Scissors - 8 inch",
-    "Rubber Bands (Assorted)", "Tape Dispenser with Tape",
-    "Envelopes #10 (100-pack)", "Index Cards (3x5, 100-pack)",
-    "Whiteboard Eraser", "Push Pins (100-pack)",
-    "Hanging File Folders (25-pack)", "Sheet Protectors (50-pack)",
-    "Mechanical Pencils (12-pack)", "Black Gel Pens (6-pack)",
-    "Desk Calendar 2026", "Letter Trays (2-tier)",
-    "Glue Sticks (6-pack)", "Post-it Flags (4 colors)",
-    "Laminating Pouches (50-pack)", "Clipboard - Standard",
+    "복사용지 500매", "블루 볼펜 (12자루)",
+    "스테이플러 세트", "스프링 노트 (3권)",
+    "마닐라 서류 폴더 (25개)", "포스트잇 메모지 (4개)",
+    "보드마카 (8개)", "클립 (100개)",
+    "더블 클립 (24개)", "리갈 패드 (6권)",
+    "형광펜 (5개)", "데스크 정리함",
+    "수정테이프 (3개)", "사무용 가위 8인치",
+    "고무밴드 모음팩", "테이프 디스펜서",
+    "DL 봉투 (100매)", "인덱스 카드 (100매)",
+    "화이트보드 지우개", "압정 (100개)",
+    "걸이형 서류 폴더 (25개)", "투명 비닐 속지 (50매)",
+    "샤프 (12자루)", "흑색 젤펜 (6자루)",
+    "2026 탁상 달력", "2단 서류 트레이",
+    "딱풀 (6개)", "포스트잇 플래그 (4색)",
+    "코팅 필름 (50매)", "기본 클립보드",
 ]
 
+# 한국 이름 풀. template의 {name} 자리에 들어감.
 NAMES = [
-    "Alex", "Jordan", "Sam", "Casey", "Morgan", "Taylor", "Riley", "Jamie",
-    "Pat", "Chris", "Drew", "Quinn", "Avery", "Blake", "Cameron", "Dana",
-    "Emerson", "Finley", "Hayden", "Jesse", "Kelly", "Lee", "Noel", "Parker",
-    "Robin", "Skyler", "Terry", "Val", "Whitney", "Kendall",
+    "민준", "서연", "도윤", "지우", "예준", "서윤", "주원", "하은",
+    "지호", "수아", "현우", "지유", "건우", "다은", "우진", "유나",
+    "선우", "윤서", "준서", "지민", "은우", "예린", "시우", "수빈",
+    "준우", "지아", "도현", "유진", "재윤", "혜린",
 ]
 
+# 한국 회사명 풀. template의 {company} 자리에 들어감.
 COMPANY_NAMES = [
-    "Whitfield & Associates", "Summit Group LLC", "Cascade Office Solutions",
-    "Bright Path Consulting", "Metro Legal Services", "Greenleaf Accounting",
-    "Pinnacle Design Co.", "Harbor Health Clinic", "Eastside Property Management",
-    "Nova Financial Group", "Crestwood Engineering", "Lakeside Marketing",
-    "Redwood Consulting", "Sterling Enterprises", "Atlas Logistics",
-    "Compass Realty", "Iron Bridge Capital", "Oakmont Partners",
-    "Sapphire Technologies", "Westlake Advisory",
+    "한빛 어소시에이츠", "서밋 그룹", "케스케이드 오피스 솔루션",
+    "브라이트 패스 컨설팅", "메트로 법무법인", "그린리프 회계법인",
+    "피너클 디자인", "하버 헬스 클리닉", "이스트사이드 부동산 관리",
+    "노바 금융그룹", "크레스트우드 엔지니어링", "레이크사이드 마케팅",
+    "레드우드 컨설팅", "스털링 엔터프라이즈", "아틀라스 물류",
+    "컴퍼스 부동산", "아이언브릿지 캐피털", "오크몬트 파트너스",
+    "사파이어 테크놀로지스", "웨스트레이크 어드바이저리",
 ]
 
+
+# --- 랜덤 값 생성 헬퍼들 ---
+# 템플릿의 placeholder({order}, {product}, {name}, {company} 등)에
+# 채워 넣을 임의의 값을 만들어 준다.
 
 def _rand_order():
+    """가짜 주문번호 (예: 'ORD-3724')."""
     return f"ORD-{random.randint(1000, 9999)}"
 
 
 def _rand_product():
+    """PRODUCTS 리스트에서 임의의 상품 하나 선택."""
     return random.choice(PRODUCTS)
 
 
 def _rand_products(n=2):
+    """PRODUCTS 리스트에서 중복 없이 n개 상품 선택."""
     return random.sample(PRODUCTS, min(n, len(PRODUCTS)))
 
 
 def _rand_name():
+    """NAMES 리스트에서 임의의 한국 이름 하나 선택."""
     return random.choice(NAMES)
 
 
 def _rand_company():
+    """COMPANY_NAMES 리스트에서 임의의 회사명 하나 선택."""
     return random.choice(COMPANY_NAMES)
 
 
 # ---------------------------------------------------------------------------
-# Question / Response templates per category
+# 카테고리별 질문 / 응답 템플릿
 # ---------------------------------------------------------------------------
+# 각 카테고리별 함수는 (질문, 응답) 튜플 리스트를 반환한다.
+# 템플릿 안의 {product}, {name}, {company}, {order} 등은 호출 시점에
+# 임의 값으로 치환된다.
 
 def _inventory_questions():
-    """Return list of (question, response) tuples for inventory category."""
+    """inventory 카테고리: 재고/취급 여부에 대한 (질문, 응답) 튜플 리스트 반환."""
     templates = [
         (
-            "Do you have {product} in stock?",
-            "Yes, {product} is currently in stock! Would you like help with anything else?"
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694?",
+            "\ub124, {product}\ub294 \ud604\uc7ac \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \ub2e4\ub978 \ub3c4\uc6c0\uc774 \ud544\uc694\ud558\uc2e0\uac00\uc694?"
         ),
         (
-            "I need to check availability on {product}. Do you carry those?",
-            "{product} is available. Let me know if you need any other product info!"
+            "{product} \uc7ac\uace0 \uc880 \ud655\uc778\ud574\uc8fc\uc138\uc694. \ucde8\uae09\ud558\uc2dc\ub294 \uc0c1\ud488 \ub9de\ub098\uc694?",
+            "{product}\ub294 \ucde8\uae09 \uc911\uc774\uace0 \uc7ac\uace0\ub3c4 \uc788\uc2b5\ub2c8\ub2e4. \ub2e4\ub978 \uc0c1\ud488 \uc815\ubcf4\ub3c4 \ud544\uc694\ud558\uc2dc\uba74 \ub9d0\uc500\ud574\uc8fc\uc138\uc694!"
         ),
         (
-            "Can you tell me if {product} is available right now?",
-            "Great news \u2014 {product} is in stock. Anything else I can help with?"
+            "{product} \uc9c0\uae08 \uad6c\ub9e4 \uac00\ub2a5\ud55c\uc9c0 \uc54c\ub824\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc88b\uc740 \uc18c\uc2dd\uc774\uc5d0\uc694 \u2014 {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \ub2e4\ub978 \ub3c4\uc6c0 \ud544\uc694\ud558\uc2e0 \ubd80\ubd84 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Hey, does OfficeFlow carry {product}?",
-            "We sure do! {product} is in our catalog and currently available."
+            "\ud639\uc2dc OfficeFlow \uc5d0\uc11c {product} \ucde8\uae09\ud558\uc2dc\ub098\uc694?",
+            "\ub124 \ucde8\uae09\ud569\ub2c8\ub2e4! {product}\ub294 \uc800\ud76c \uce74\ud0c8\ub85c\uadf8\uc5d0 \uc788\uace0 \ud604\uc7ac \uc7ac\uace0\ub3c4 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "I'm looking for {product}. Are those something you sell?",
-            "Absolutely! {product} is one of our products and it's in stock right now."
+            "{product}\ub97c \ucc3e\uace0 \uc788\ub294\ub370 \ud310\ub9e4\ud558\uc2dc\ub294 \uc0c1\ud488\uc778\uac00\uc694?",
+            "\ubb3c\ub860\uc785\ub2c8\ub2e4! {product}\ub294 \uc800\ud76c \ucde8\uae09 \uc0c1\ud488\uc774\uace0 \uc9c0\uae08 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "What's the availability on {product}? We need about 50 units.",
-            "{product} is in stock. For a bulk order of 50 units, you can place it through our web portal or contact sales@officeflow.com for assistance."
+            "{product} \uc7ac\uace0 \uc5b4\ub5a4\uac00\uc694? 50\uac1c \uc815\ub3c4 \ud544\uc694\ud569\ub2c8\ub2e4.",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. 50\uac1c \uc815\ub3c4\uc758 \ub300\ub7c9 \uc8fc\ubb38\uc774\ub77c\uba74 \uc6f9 \ud3ec\ud138\uc744 \ud1b5\ud574 \uc9c4\ud589\ud558\uc2dc\uac70\ub098 sales@officeflow.com \uc73c\ub85c \ubb38\uc758 \uc8fc\uc138\uc694."
         ),
         (
-            "Is {product} running low? I need to order soon.",
-            "{product} is in stock, but I'd recommend ordering soon to make sure you get what you need. You can order through our portal or email sales@officeflow.com."
+            "{product} \uc7ac\uace0\uac00 \ub5a8\uc5b4\uc9c0\uae30 \uc804\uc5d0 \ube68\ub9ac \uc8fc\ubb38\ud558\uace0 \uc2f6\uc740\ub370, \uc9c0\uae08 \uc7ac\uace0 \uc788\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uc9c0\ub9cc, \uc548\uc804\ud558\uac8c \ubc1b\uc73c\uc2dc\ub824\uba74 \ube68\ub9ac \uc8fc\ubb38\ud558\uc2dc\ub294 \uac78 \uad8c\uc7a5\ub4dc\ub9bd\ub2c8\ub2e4. \ud3ec\ud138\uc5d0\uc11c \uc8fc\ubb38\ud558\uc2dc\uac70\ub098 sales@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc154\ub3c4 \ub429\ub2c8\ub2e4."
         ),
         (
-            "Hi, I'd like to know if you have {product} and {product2} available.",
-            "Both {product} and {product2} are currently in stock! Let me know if you need any other details."
+            "\uc548\ub155\ud558\uc138\uc694, {product}\uc640 {product2} \ub458 \ub2e4 \uad6c\ub9e4 \uac00\ub2a5\ud55c\uc9c0 \uc54c\ub824\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "{product}\uc640 {product2} \ubaa8\ub450 \ud604\uc7ac \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \ucd94\uac00\ub85c \ud544\uc694\ud558\uc2e0 \uc815\ubcf4\uac00 \uc788\uc73c\uba74 \uc54c\ub824\uc8fc\uc138\uc694."
         ),
         (
-            "We're restocking our office. Do you have {product} on hand?",
-            "Yes, {product} is available! If you're doing a big restock, our sales team at sales@officeflow.com can help with bulk pricing."
+            "\uc0ac\ubb34\uc2e4 \ube44\ud488\uc744 \ub2e4\uc2dc \ucc44\uc6b0\ub824\uace0 \ud558\ub294\ub370\uc694, {product} \uac00\uc9c0\uace0 \uacc4\uc2e0\uac00\uc694?",
+            "\ub124, {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \ub300\ub7c9 \uc7ac\uc785\uace0\ub77c\uba74 sales@officeflow.com \uc73c\ub85c \ubb38\uc758\ud558\uc2dc\uba74 \ub300\ub7c9 \ud560\uc778 \uac00\uaca9\uc744 \uc548\ub0b4\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "Quick question \u2014 is {product} still available or is it sold out?",
-            "{product} is still available. Go ahead and grab it through the portal whenever you're ready!"
+            "\uac04\ub2e8\ud788 \uc5ec\ucb64\ubcfc\uac8c\uc694 \u2014 {product} \uc544\uc9c1 \ud310\ub9e4 \uc911\uc778\uac00\uc694, \uc544\ub2c8\uba74 \ud488\uc808\uc778\uac00\uc694?",
+            "{product}\ub294 \uc544\uc9c1 \ud310\ub9e4 \uc911\uc785\ub2c8\ub2e4. \uc900\ube44\ub418\uc2dc\uba74 \ud3ec\ud138\uc5d0\uc11c \ubc14\ub85c \uc8fc\ubb38\ud558\uc138\uc694!"
         ),
         (
-            "I placed an order for {product} last week but I might need more. Do you still have them?",
-            "We do still have {product} in stock. You can place another order through the web portal anytime."
+            "\uc9c0\ub09c\uc8fc\uc5d0 {product} \uc8fc\ubb38\ud588\ub294\ub370 \ucd94\uac00\ub85c \ub354 \ud544\uc694\ud560 \uac83 \uac19\uc544\uc694. \uc544\uc9c1 \uc7ac\uace0 \uc788\ub098\uc694?",
+            "{product}\ub294 \uc544\uc9c1 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uc6f9 \ud3ec\ud138\uc5d0\uc11c \uc5b8\uc81c\ub4e0 \ucd94\uac00 \uc8fc\ubb38 \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "Can you look up whether {product} is in your inventory?",
-            "I just checked and {product} is in stock. Let me know if there's anything else!"
+            "{product}\uac00 \uc7ac\uace0\uc5d0 \uc788\ub294\uc9c0 \ud55c \ubc88 \ud655\uc778\ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubc29\uae08 \ud655\uc778\ud588\ub294\ub370 {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \ub354 \ud544\uc694\ud55c \uac8c \uc788\uc73c\uc2dc\uba74 \ub9d0\uc500\ud574\uc8fc\uc138\uc694!"
         ),
         (
-            "My name is {name} and I need {product} for our office at {company}. Available?",
-            "Hi {name}! {product} is in stock and ready to go. You can order through the portal or reach out to sales@officeflow.com."
+            "\uc548\ub155\ud558\uc138\uc694, \uc800\ub294 {name} \uc774\uace0 {company} \uc0ac\ubb34\uc2e4\uc5d0 {product}\uac00 \ud544\uc694\ud569\ub2c8\ub2e4. \uad6c\ub9e4 \uac00\ub2a5\ud560\uae4c\uc694?",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0\uac00 \uc788\uace0 \ubc14\ub85c \ubc1c\uc1a1 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud3ec\ud138\uc5d0\uc11c \uc8fc\ubb38\ud558\uc2dc\uac70\ub098 sales@officeflow.com \uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "Do you carry anything like {product}? My office needs some.",
-            "We carry {product} and it's currently available. Would you like more details or recommendations for similar items?"
+            "{product} \uac19\uc740 \uac70 \ucde8\uae09\ud558\uc2dc\ub098\uc694? \uc0ac\ubb34\uc2e4\uc5d0\uc11c \uc880 \ud544\uc694\ud574\uc11c\uc694.",
+            "\ub124, {product}\ub294 \ud604\uc7ac \ucde8\uae09 \uc911\uc774\uace0 \uc7ac\uace0\ub3c4 \uc788\uc2b5\ub2c8\ub2e4. \ucd94\uac00 \uc815\ubcf4\ub098 \uc720\uc0ac \uc0c1\ud488 \ucd94\ucc9c \ud544\uc694\ud558\uc2dc\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "I saw {product} on your website but couldn't tell if it's in stock. Can you confirm?",
-            "{product} is confirmed in stock! You should be able to order directly from the site."
+            "{product}\ub97c \uc6f9\uc0ac\uc774\ud2b8\uc5d0\uc11c \ubd24\ub294\ub370 \uc7ac\uace0\uac00 \uc788\ub294\uc9c0 \uc798 \ubaa8\ub974\uaca0\uc5b4\uc694. \ud655\uc778 \ubd80\ud0c1\ub4dc\ub824\uc694.",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\ub294 \uac83\uc73c\ub85c \ud655\uc778\ub429\ub2c8\ub2e4! \uc0ac\uc774\ud2b8\uc5d0\uc11c \ubc14\ub85c \uc8fc\ubb38\ud558\uc2e4 \uc218 \uc788\uc744 \uac70\uc608\uc694."
         ),
         (
-            "What office supply products do you have for organizing files?",
-            "We have several filing options in stock, including Manila File Folders (25-pack), Hanging File Folders (25-pack), and Sheet Protectors (50-pack). Let me know which you're interested in!"
+            "\uc11c\ub958 \uc815\ub9ac\uc6a9 \uc0ac\ubb34\uc6a9\ud488\uc73c\ub85c \uc5b4\ub5a4 \uac83\ub4e4\uc774 \uc788\ub098\uc694?",
+            "\uc11c\ub958 \uc815\ub9ac\uc6a9\uc73c\ub85c\ub294 \ub9c8\ub2d0\ub77c \uc11c\ub958 \ud3f4\ub354 (25\uac1c), \uac78\uc774\ud615 \uc11c\ub958 \ud3f4\ub354 (25\uac1c), \ud22c\uba85 \ube44\ub2d0 \uc18d\uc9c0 (50\ub9e4) \ub4f1\uc774 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uad00\uc2ec \uc788\ub294 \ud56d\ubaa9 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "Do you have any writing instruments available? Looking for pens and pencils.",
-            "Absolutely! We have Blue Ballpoint Pens (12-pack), Black Gel Pens (6-pack), Mechanical Pencils (12-pack), and Highlighters (5-pack) all in stock."
+            "\ud544\uae30\uad6c \uc7ac\uace0 \uc788\ub294 \uac83 \uc788\ub098\uc694? \ud39c\uc774\ub791 \uc5f0\ud544 \ucc3e\uace0 \uc788\uc5b4\uc694.",
+            "\ubb3c\ub860\uc785\ub2c8\ub2e4! \ube14\ub8e8 \ubcfc\ud39c (12\uc790\ub8e8), \ud751\uc0c9 \uc824\ud39c (6\uc790\ub8e8), \uc0e4\ud504 (12\uc790\ub8e8), \ud615\uad11\ud39c (5\uac1c) \ubaa8\ub450 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "I need desk accessories. What's in stock?",
-            "We have several desk accessories available: Desk Organizer Tray, Letter Trays (2-tier), Desk Calendar 2026, and Tape Dispenser with Tape. Let me know what catches your eye!"
+            "\ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac\uac00 \ud544\uc694\ud569\ub2c8\ub2e4. \uc7ac\uace0 \uc788\ub294 \uac83 \ubb50\uac00 \uc788\ub098\uc694?",
+            "\ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac\ub294 \ub370\uc2a4\ud06c \uc815\ub9ac\ud568, 2\ub2e8 \uc11c\ub958 \ud2b8\ub808\uc774, 2026 \ud0c1\uc0c1 \ub2ec\ub825, \ud14c\uc774\ud504 \ub514\uc2a4\ud39c\uc11c \ub4f1\uc774 \uc788\uc2b5\ub2c8\ub2e4. \ub9c8\uc74c\uc5d0 \ub4dc\ub294 \uac8c \uc788\uc73c\uc2dc\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "Are {product} available? We go through those fast at {company}.",
-            "{product} is in stock. If you go through them quickly, you might want to check with sales@officeflow.com about setting up recurring orders."
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694? \uc800\ud76c {company}\uc5d0\uc11c \uc774\uac70 \uc815\ub9d0 \ube68\ub9ac \uc18c\uc9c4\ub3fc\uc694.",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \ube60\ub974\uac8c \uc18c\uc9c4\ub418\uc2e0\ub2e4\uba74 sales@officeflow.com \uc73c\ub85c \uc815\uae30 \uc8fc\ubb38 \uc124\uc815\uc5d0 \ub300\ud574 \ubb38\uc758\ud574\ubcf4\uc138\uc694."
         ),
         (
-            "Hi there, this is {name}. Could you check stock on {product} for me?",
-            "Hi {name}! {product} is in stock. Would you like to place an order?"
+            "\uc548\ub155\ud558\uc138\uc694, {name}\uc785\ub2c8\ub2e4. {product} \uc7ac\uace0 \ud655\uc778 \ubd80\ud0c1\ub4dc\ub824\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uc8fc\ubb38 \ub3c4\uc640\ub4dc\ub9b4\uae4c\uc694?"
         ),
         (
-            "I need {product} urgently. Please tell me you have them.",
-            "Good news \u2014 {product} is in stock! You can place an order right away through the web portal."
+            "{product}\uac00 \uae09\ud558\uac8c \ud544\uc694\ud55c\ub370, \uc7ac\uace0 \uc788\ub2e4\uace0 \ub9d0\uc500\ud574\uc8fc\uc138\uc694.",
+            "\uc88b\uc740 \uc18c\uc2dd\uc774\uc5d0\uc694 \u2014 {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \uc6f9 \ud3ec\ud138\uc5d0\uc11c \ubc14\ub85c \uc8fc\ubb38 \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "We just ran out of {product}. Do you have any?",
-            "We do have {product} available! Order through the portal and you'll be restocked in no time."
+            "{product}\uac00 \ubc29\uae08 \ub2e4 \ub5a8\uc5b4\uc84c\ub294\ub370\uc694. \uc7ac\uace0 \uc788\ub098\uc694?",
+            "{product} \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ud3ec\ud138\uc5d0\uc11c \uc8fc\ubb38\ud558\uc2dc\uba74 \uae08\ubc29 \ub2e4\uc2dc \ucc44\uc6b0\uc2e4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "Can I get a stock check on {product} and {product2}?",
-            "Both {product} and {product2} are currently in stock. Let me know if you'd like to order!"
+            "{product}\ud558\uace0 {product2} \uc7ac\uace0 \ud655\uc778 \uc880 \ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "{product}\uc640 {product2} \ubaa8\ub450 \ud604\uc7ac \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uc8fc\ubb38\ud558\uc2dc\ub824\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "How much {product} do you have available? We need a large quantity.",
-            "{product} is currently in stock. For large quantity orders, I'd recommend contacting our sales team at sales@officeflow.com for the best pricing."
+            "{product} \uc5bc\ub9c8\ub098 \uc788\ub098\uc694? \ub300\ub7c9\uc73c\ub85c \ud544\uc694\ud569\ub2c8\ub2e4.",
+            "{product}\ub294 \ud604\uc7ac \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \ub300\ub7c9 \uc8fc\ubb38\uc740 sales@officeflow.com \uc73c\ub85c \uc601\uc5c5\ud300\uc5d0 \ubb38\uc758\ud558\uc2dc\uba74 \ucd5c\uc801\uc758 \uac00\uaca9\uc744 \uc548\ub0b4\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "I'm with {company}. We need {product} \u2014 is that something you stock?",
-            "Hi! We definitely stock {product} and it's available right now. Your team at {company} can order through the portal or email sales@officeflow.com."
+            "\uc800 {company}\uc5d0\uc11c \uc77c\ud558\uace0 \uc788\uc5b4\uc694. {product}\uac00 \ud544\uc694\ud55c\ub370, \ucde8\uae09\ud558\uc2dc\ub294 \uc0c1\ud488\uc778\uac00\uc694?",
+            "\uc548\ub155\ud558\uc138\uc694! {product}\ub294 \ubd84\uba85\ud788 \ucde8\uae09\ud558\uace0 \uc788\uace0 \uc9c0\uae08 \uc7ac\uace0\ub3c4 \uc788\uc2b5\ub2c8\ub2e4. {company}\ud300\uc5d0\uc11c \ud3ec\ud138\uc744 \ud1b5\ud574 \uc8fc\ubb38\ud558\uc2dc\uac70\ub098 sales@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc154\ub3c4 \ub429\ub2c8\ub2e4."
         ),
         (
-            "Are there any {product} left? I've been meaning to order.",
-            "Yes, {product} is still in stock! Go ahead and place your order whenever you're ready."
+            "{product} \ub0a8\uc740 \uac70 \uc788\ub098\uc694? \uc8fc\ubb38\ud558\ub824\uace0 \uacc4\uc18d \ubbf8\ub8e8\uace0 \uc788\uc5c8\uc5b4\uc694.",
+            "\ub124, {product}\ub294 \uc544\uc9c1 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \uc900\ube44\ub418\uc2dc\uba74 \uc5b8\uc81c\ub4e0 \uc8fc\ubb38 \uc9c4\ud589\ud558\uc138\uc694."
         ),
         (
-            "Could you check if {product} is in your warehouse?",
-            "Just checked \u2014 {product} is in stock. You're good to order!"
+            "{product}\uac00 \ucc3d\uace0\uc5d0 \uc788\ub294\uc9c0 \ud655\uc778\ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubc29\uae08 \ud655\uc778\ud588\uc5b4\uc694 \u2014 {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uc8fc\ubb38 \uac00\ub2a5\ud569\ub2c8\ub2e4!"
         ),
         (
-            "What paper products do you currently have available?",
-            "We have several paper products in stock: Copy Paper 500 Sheets, Legal Pads (6-pack), Spiral Notebooks (3-pack), and Index Cards (3x5, 100-pack). Want details on any of these?"
+            "\ud604\uc7ac \uc7ac\uace0\uac00 \uc788\ub294 \uc885\uc774\ub958 \uc0c1\ud488\uc73c\ub85c\ub294 \uc5b4\ub5a4 \uac8c \uc788\ub098\uc694?",
+            "\uc885\uc774\ub958 \uc0c1\ud488\uc73c\ub85c\ub294 \ubcf5\uc0ac\uc6a9\uc9c0 500\ub9e4, \ub9ac\uac08 \ud328\ub4dc (6\uad8c), \uc2a4\ud504\ub9c1 \ub178\ud2b8 (3\uad8c), \uc778\ub371\uc2a4 \uce74\ub4dc (100\ub9e4) \ub4f1\uc774 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uc790\uc138\ud55c \uc815\ubcf4\uac00 \ud544\uc694\ud55c \ud56d\ubaa9 \uc788\uc73c\uc2dc\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "Looking for sticky notes and similar products. What do you have?",
-            "We've got Sticky Notes (4-pack) and Post-it Flags (4 colors) in stock right now. Both are great for organization!"
+            "\ud3ec\uc2a4\ud2b8\uc787\uc774\ub098 \ube44\uc2b7\ud55c \uc885\ub958\uc758 \uc0c1\ud488 \ucc3e\uace0 \uc788\uc5b4\uc694. \uc5b4\ub5a4 \uac8c \uc788\ub098\uc694?",
+            "\ud604\uc7ac \ud3ec\uc2a4\ud2b8\uc787 \uba54\ubaa8\uc9c0 (4\uac1c)\uc640 \ud3ec\uc2a4\ud2b8\uc787 \ud50c\ub798\uadf8 (4\uc0c9)\uac00 \uc7ac\uace0\uc5d0 \uc788\uc2b5\ub2c8\ub2e4. \ub458 \ub2e4 \uc815\ub9ac\uc6a9\uc73c\ub85c \uc544\uc8fc \uc88b\uc544\uc694!"
         ),
         (
-            "Hi, my name's {name} from {company}. Just checking \u2014 do you have {product}?",
-            "Hi {name}! Yes, {product} is currently available. Let me know if you need anything else for {company}!"
+            "\uc548\ub155\ud558\uc138\uc694, \uc800\ub294 {company}\uc758 {name}\uc785\ub2c8\ub2e4. {product} \uc788\ub294\uc9c0 \ud655\uc778 \uc880 \ubd80\ud0c1\ub4dc\ub824\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! \ub124, {product}\ub294 \ud604\uc7ac \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4. {company}\uc5d0 \ub2e4\ub978 \ud544\uc694\ud558\uc2e0 \uac8c \uc788\uc73c\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "We use {product} a lot. Can you confirm they're in stock before I order?",
-            "Confirmed \u2014 {product} is in stock. Go ahead and place your order!"
+            "\uc800\ud76c\uac00 {product}\ub97c \ub9ce\uc774 \uc0ac\uc6a9\ud574\uc694. \uc8fc\ubb38 \uc804\uc5d0 \uc7ac\uace0 \ud655\uc778 \uc880 \ud574\uc8fc\uc2dc\uaca0\uc5b4\uc694?",
+            "\ud655\uc778\ud588\uc2b5\ub2c8\ub2e4 \u2014 {product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4. \uc8fc\ubb38 \uc9c4\ud589\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "I'm browsing your catalog and wondering about availability for {product}.",
-            "{product} is in stock and ready to ship. Let me know if you have questions about any other items!"
+            "\uce74\ud0c8\ub85c\uadf8\ub97c \ubcf4\uba74\uc11c {product}\uac00 \uc788\ub294\uc9c0 \uad81\uae08\ud574\uc11c \ubb38\uc758\ub4dc\ub9bd\ub2c8\ub2e4.",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uace0 \ubc1c\uc1a1 \uc900\ube44\ub3c4 \ub418\uc5b4 \uc788\uc2b5\ub2c8\ub2e4. \ub2e4\ub978 \uc0c1\ud488\uc5d0 \ub300\ud574 \uad81\uae08\ud55c \uc810 \uc788\uc73c\uc2dc\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "Our supply closet is empty. Do you have {product}, {product2}, and {product3}?",
-            "Great news \u2014 {product}, {product2}, and {product3} are all currently in stock! Perfect for a full restock."
+            "\ube44\ud488 \ucc3d\uace0\uac00 \ube44\uc5c8\uc5b4\uc694. {product}, {product2}, {product3} \ub2e4 \uc7ac\uace0 \uc788\ub098\uc694?",
+            "\uc88b\uc740 \uc18c\uc2dd\uc785\ub2c8\ub2e4 \u2014 {product}, {product2}, {product3} \ubaa8\ub450 \ud604\uc7ac \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \ud55c \ubc88\uc5d0 \ub2e4 \ucc44\uc6b0\uc2dc\uae30 \ub531 \uc88b\uc544\uc694."
         ),
         (
-            "Is there currently limited stock on {product}?",
-            "{product} is in stock, though inventory levels can change. I'd recommend ordering soon if you need it!"
+            "\ud639\uc2dc {product} \uc7ac\uace0\uac00 \ubd80\uc871\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uae34 \ud55c\ub370 \uc7ac\uace0 \uc218\ub7c9\uc774 \ubcc0\ub3d9\ub420 \uc218 \uc788\uc73c\ub2c8, \ud544\uc694\ud558\uc2dc\uba74 \ube68\ub9ac \uc8fc\ubb38\ud558\uc2dc\ub294 \uac78 \ucd94\ucc9c\ub4dc\ub824\uc694!"
         ),
         (
-            "Hey, can you check whether you have {product} available for shipping to {company}?",
-            "{product} is in stock and we can ship to {company}'s address. Just place the order through our portal!"
+            "{company}\ub85c \ubc30\uc1a1 \uac00\ub2a5\ud55c\uc9c0, {product} \uc7ac\uace0 \uc880 \ud655\uc778\ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "{product} \uc7ac\uace0 \uc788\uace0, {company} \uc8fc\uc18c\ub85c \ubc30\uc1a1 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud3ec\ud138\uc5d0\uc11c \ubc14\ub85c \uc8fc\ubb38\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "I need to order {product}. What's the stock situation?",
-            "{product} is available. You can go ahead and order through the web portal at your convenience."
+            "{product}\ub97c \uc8fc\ubb38\ud558\ub824\uace0 \ud558\ub294\ub370\uc694. \uc7ac\uace0 \uc0c1\ud669\uc740 \uc5b4\ub5a4\uac00\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud3b8\ud558\uc2e4 \ub54c \uc6f9 \ud3ec\ud138\uc5d0\uc11c \uc8fc\ubb38 \uc9c4\ud589\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "Can I get {product} shipped to our office this week?",
-            "{product} is in stock! If you order before 2:00 PM EST, it ships same day. Standard delivery is 3-5 business days."
+            "\uc774\ubc88 \uc8fc \uc548\uc5d0 {product}\ub97c \uc0ac\ubb34\uc2e4\ub85c \ubc1b\uc744 \uc218 \uc788\uc744\uae4c\uc694?",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! KST \uc624\ud6c4 2\uc2dc \uc804\uc5d0 \uc8fc\ubb38\ud558\uc2dc\uba74 \ub2f9\uc77c \ucd9c\uace0\ub429\ub2c8\ub2e4. \ud45c\uc900 \ubc30\uc1a1\uc740 3~5\uc601\uc5c5\uc77c \uc18c\uc694\ub429\ub2c8\ub2e4."
         ),
         (
-            "Do you currently stock {product}? I can't find it on the website.",
-            "Yes, we do carry {product} and it's in stock! If you're having trouble finding it on the site, try searching by the product name or contact support@officeflow.com for help."
+            "{product} \ucde8\uae09\ud558\uc2dc\ub098\uc694? \uc6f9\uc0ac\uc774\ud2b8\uc5d0\uc11c \ubabb \ucc3e\uaca0\uc5b4\uc694.",
+            "\ub124, {product} \ucde8\uae09\ud558\uace0 \uc788\uace0 \uc7ac\uace0\ub3c4 \uc788\uc2b5\ub2c8\ub2e4! \uc0ac\uc774\ud2b8\uc5d0\uc11c \ubabb \ucc3e\uc73c\uc168\ub2e4\uba74 \uc0c1\ud488\uba85\uc73c\ub85c \uac80\uc0c9\ud574\ubcf4\uc2dc\uac70\ub098 support@officeflow.com \uc73c\ub85c \ubb38\uc758 \uc8fc\uc2dc\uba74 \ub3c4\uc640\ub4dc\ub9ac\uaca0\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "My assistant asked me to check on {product} availability. Are they in stock?",
-            "{product} is in stock! Let your assistant know they can order through the portal anytime."
+            "\ube44\uc11c\uac00 {product} \uc7ac\uace0 \ud655\uc778\ud574 \ubcf4\ub77c\uace0 \ud574\uc11c\uc694. \uc7ac\uace0 \uc788\ub098\uc694?",
+            "{product} \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ube44\uc11c\ubd84\uaed8 \uc5b8\uc81c\ub4e0 \ud3ec\ud138\uc5d0\uc11c \uc8fc\ubb38 \uac00\ub2a5\ud558\ub2e4\uace0 \uc804\ud574\uc8fc\uc138\uc694."
         ),
         (
-            "I'm {name} and I need to restock our breakroom. Do you carry {product}?",
-            "Hi {name}! We do carry {product} and it's currently available. Let me know if you need anything else!"
+            "\uc800\ub294 {name}\uc785\ub2c8\ub2e4. \ud734\uac8c\uc2e4 \ube44\ud488\uc744 \ub2e4\uc2dc \ucc44\uc6b0\ub824\uace0 \ud558\ub294\ub370, {product} \ucde8\uae09\ud558\uc2dc\ub098\uc694?",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product} \ucde8\uae09\ud558\uace0 \uc788\uace0 \ud604\uc7ac \uc7ac\uace0\ub3c4 \uc788\uc2b5\ub2c8\ub2e4. \ub354 \ud544\uc694\ud55c \uac8c \uc788\uc73c\uc2dc\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
     ]
     pairs = []
@@ -284,167 +311,167 @@ def _inventory_questions():
 
 
 def _policy_questions():
-    """Return list of (question, response) tuples for policy category."""
+    """policy \uce74\ud14c\uace0\ub9ac: \ud68c\uc0ac \uc815\ucc45(\ubc18\ud488/\ubc30\uc1a1/\uc601\uc5c5\uc2dc\uac04 \ub4f1)\uc5d0 \ub300\ud55c (\uc9c8\ubb38, \uc751\ub2f5) \ud29c\ud50c \ub9ac\uc2a4\ud2b8 \ubc18\ud658."""
     templates = [
         (
-            "What's your return policy?",
-            "Items can be returned within 30 days of delivery. You'll need an RMA number from our Returns Department \u2014 contact them at returns@officeflow.com or 1-800-OFFICE-1 ext. 3. Defective items can be returned anytime."
+            "\ubc18\ud488 \uc815\ucc45\uc774 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "\uc218\ub839 \ud6c4 30\uc77c \uc774\ub0b4\uc5d0 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ubc18\ud488\ud300(returns@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 3\ubc88)\uc5d0\uc11c RMA \ubc88\ud638\ub97c \ubc1c\uae09\ubc1b\uc73c\uc154\uc57c \ud569\ub2c8\ub2e4. \ubd88\ub7c9\ud488\uc740 \uc5b8\uc81c\ub4e0 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "How do I return a defective item?",
-            "For defective items, email returns@officeflow.com with your order number, a description of the defect, and photos if possible. They'll issue an RMA and a prepaid return label at no cost."
+            "\ubd88\ub7c9\ud488\uc740 \uc5b4\ub5bb\uac8c \ubc18\ud488\ud558\ub098\uc694?",
+            "\ubd88\ub7c9\ud488 \ubc18\ud488\uc740 returns@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638, \ubd88\ub7c9 \ub0b4\uc6a9, \uac00\ub2a5\ud558\uba74 \uc0ac\uc9c4\uc744 \ucca8\ubd80\ud574\uc11c \uba54\uc77c \uc8fc\uc138\uc694. RMA \ubc88\ud638\uc640 \ubb34\ub8cc \ubc18\ud488 \ub77c\ubca8\uc744 \ubc1c\uae09\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
+        ),
+            (
+            "\ubc30\uc1a1 \uc635\uc158\uacfc \ube44\uc6a9\uc774 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "\uc77c\ubc18 \ubc30\uc1a1(8,950\uc6d0, 3~5\uc77c), \ube60\ub978 \ubc30\uc1a1(15,950\uc6d0, 2~3\uc77c), \ud2b9\uae09 \ubc30\uc1a1(24,950\uc6d0, 1~2\uc77c), \uc775\uc77c \ubc30\uc1a1(39,950\uc6d0, \uc775\uc77c)\uc774 \uc788\uc2b5\ub2c8\ub2e4. 10\ub9cc\uc6d0 \uc774\uc0c1 \uc8fc\ubb38 \uc2dc \uc77c\ubc18 \ubc30\uc1a1 \ubb34\ub8cc!"
         ),
         (
-            "What are your shipping options and costs?",
-            "We offer Standard ($8.95, 3-5 days), Expedited ($15.95, 2-3 days), Express ($24.95, 1-2 days), and Overnight ($39.95, next day). Standard shipping is free on orders over $100!"
+            "\ubb34\ub8cc \ubc30\uc1a1\ub3c4 \uc788\ub098\uc694?",
+            "\ub124! 10\ub9cc\uc6d0 \uc774\uc0c1 \uc8fc\ubb38 \uc2dc \uc77c\ubc18 \ubc30\uc1a1 \ubb34\ub8cc\uc785\ub2c8\ub2e4. 25\ub9cc\uc6d0 \uc774\uc0c1 \uc8fc\ubb38\uc740 \ube60\ub978 \ubc30\uc1a1\ub3c4 \ubb34\ub8cc\uc785\ub2c8\ub2e4."
         ),
         (
-            "Do you offer free shipping?",
-            "Yes! Standard shipping is free on orders of $100 or more. Expedited shipping is free on orders of $250+."
+            "\uc77c\ubc18 \ubc30\uc1a1\uc740 \uc5bc\ub9c8\ub098 \uac78\ub9ac\ub098\uc694?",
+            "\uc77c\ubc18 \ubc30\uc1a1\uc740 3~5\uc601\uc5c5\uc77c \uc18c\uc694\ub429\ub2c8\ub2e4. KST \uc624\ud6c4 2\uc2dc \uc774\uc804 \uc8fc\ubb38\uc740 \ub2f9\uc77c \ucd9c\uace0\ub429\ub2c8\ub2e4."
         ),
         (
-            "How long does standard shipping take?",
-            "Standard shipping takes 3-5 business days. Orders placed before 2:00 PM EST ship the same day."
+            "\ud574\uc678 \ubc30\uc1a1 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\ub124! \uac00\uae4c\uc6b4 \uc544\uc2dc\uc544 \uad6d\uac00\ub294 \ubaa8\ub450 \ubc30\uc1a1 \uac00\ub2a5\ud569\ub2c8\ub2e4. \uad00\uc138 \ubc0f \uc138\uae08\uc774 \ubd80\uacfc\ub420 \uc218 \uc788\uc73c\uba70, \ud1b5\uad00\uc5d0 1~2\uc77c \ucd94\uac00 \uc18c\uc694\ub429\ub2c8\ub2e4."
         ),
         (
-            "Can I ship to Canada?",
-            "Absolutely! We ship to all Canadian provinces and territories. Duties and taxes may apply, and you should expect an extra 1-2 days for customs."
+            "\uc601\uc5c5\uc2dc\uac04\uc774 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "\uba54\uc778 \uc804\ud654 \uc0c1\ub2f4\uc740 \ud3c9\uc77c \uc624\uc804 7\uc2dc ~ \uc624\ud6c4 7\uc2dc (KST), \ud1a0\uc694\uc77c \uc624\uc804 9\uc2dc ~ \uc624\ud6c4 2\uc2dc (KST)\uc5d0 \uac00\ub2a5\ud569\ub2c8\ub2e4. \uc77c\uc694\uc77c\uc740 \ud734\ubb34\uc785\ub2c8\ub2e4."
         ),
         (
-            "What are your business hours?",
-            "Our main phone line is open Monday-Friday 7:00 AM - 7:00 PM EST, and Saturday 9:00 AM - 2:00 PM EST. We're closed on Sundays."
+            "\uc8fc\ubb38\uc740 \uc5b4\ub5bb\uac8c \ud558\ub098\uc694?",
+            "\uc6f9 \ud3ec\ud138(www.officeflow.com)\uc744 \ud1b5\ud574 \uc8fc\ubb38\ud558\uc2dc\uac70\ub098, sales@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 2\ubc88\uc73c\ub85c \uc601\uc5c5\ud300\uc5d0 \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "How do I place an order?",
-            "You can place orders through our web portal at www.officeflow.com or by contacting our sales team at sales@officeflow.com or 1-800-OFFICE-1 ext. 2."
+            "\ubc18\ud488 \uac00\ub2a5 \uae30\uac04\uc774 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694? \ubc1b\uc740 \uc9c0 2\uc8fc \uc815\ub3c4 \ub410\uc5b4\uc694.",
+            "\ubc18\ud488 \uac00\ub2a5 \uae30\uac04 \ub0b4\uc5d0 \uc788\uc2b5\ub2c8\ub2e4! \uc218\ub839 \ud6c4 30\uc77c \uc774\ub0b4\uc5d0 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4. returns@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638 \ubcf4\ub0b4\uc2dc\uba74 RMA\ub97c \ubc1c\uae09\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "What's the return window? I got something two weeks ago.",
-            "You're within the return window! Items can be returned within 30 days of delivery. Contact returns@officeflow.com with your order number to get an RMA."
+            "{order} \uc8fc\ubb38 \uac74\uc744 \ubc18\ud488\ud558\uace0 \uc2f6\uc740\ub370 \uc5b4\ub5bb\uac8c \uc9c4\ud589\ud558\ub098\uc694?",
+            "{order} \uc8fc\ubb38 \ubc18\ud488\uc744 \uc704\ud574\uc11c\ub294 returns@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638\uc640 \ubc18\ud488 \uc0ac\uc720\ub97c \ubcf4\ub0b4\uc8fc\uc138\uc694. 4\uc601\uc5c5\uc2dc\uac04 \uc774\ub0b4\uc5d0 RMA\uac00 \ubc1c\uae09\ub429\ub2c8\ub2e4."
         ),
         (
-            "I need to process a return on order {order}. How do I do that?",
-            "To start a return on order {order}, email returns@officeflow.com with your order number and reason for the return. They'll issue an RMA within 4 business hours."
+            "\ud658\ubd88\uc740 \uc5bc\ub9c8\ub098 \uac78\ub9ac\ub098\uc694?",
+            "\ud658\ubd88\uc740 \ubc18\ud488 \ub3c4\ucc29 \ud6c4 5~7\uc601\uc5c5\uc77c \uc774\ub0b4\uc5d0 \ucc98\ub9ac\ub429\ub2c8\ub2e4. \ud658\ubd88 \uae08\uc561\uc740 \uc6d0\ub798 \uacb0\uc81c \uc218\ub2e8\uc73c\ub85c \ub2e4\uc2dc \uc785\uae08\ub429\ub2c8\ub2e4."
         ),
         (
-            "How long do refunds take?",
-            "Refunds are processed within 5-7 business days after we receive your return. The credit goes back to your original payment method."
+            "\ud574\uc678 \ubc30\uc1a1\ub3c4 \ud558\uc2dc\ub098\uc694?",
+            "\uae30\ubcf8\uc801\uc73c\ub85c \uad6d\ub0b4 \ubc30\uc1a1\uc744 \uc81c\uacf5\ud558\uace0, \uac00\uae4c\uc6b4 \uc544\uc2dc\uc544 \uad6d\uac00\ub3c4 \ubc30\uc1a1 \uac00\ub2a5\ud569\ub2c8\ub2e4. \uadf8 \uc678 \uc9c0\uc5ed\uc740 sales@officeflow.com \uc73c\ub85c \uacac\uc801 \ubb38\uc758 \uc8fc\uc138\uc694 \u2014 \ub300\ub7c9 \uc8fc\ubb38 \uae30\uc900\uc73c\ub85c \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "Do you ship internationally?",
-            "We ship to the US and Canada as standard. For international orders outside those areas, contact sales@officeflow.com for a quote \u2014 it's available for large orders."
+            "\ub2f9\uc77c \ubc30\uc1a1 \ub9c8\uac10 \uc2dc\uac04\uc774 \uc5b8\uc81c\uc778\uac00\uc694?",
+            "KST \uc624\ud6c4 2\uc2dc \uc774\uc804\uc5d0 \uc8fc\ubb38\ud558\uc2dc\uba74 \ub2f9\uc77c \ucd9c\uace0\ub429\ub2c8\ub2e4. \uadf8 \uc774\ud6c4 \uc8fc\ubb38\uc740 \ub2e4\uc74c \uc601\uc5c5\uc77c\uc5d0 \ucd9c\uace0\ub429\ub2c8\ub2e4."
         ),
         (
-            "What's the cutoff time for same-day shipping?",
-            "Orders placed before 2:00 PM EST ship the same business day. After that, they ship the next business day."
+            "\ubc30\uc1a1 \ub300\uc2e0 \uc9c1\uc811 \ubc29\ubb38 \uc218\ub839 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\ub124! \uc11c\uc6b8 \ubcf8\uc0ac, \ubd80\uc0b0 \ubb3c\ub958\uc13c\ud130, \uad11\uc8fc \ubb3c\ub958\uc13c\ud130, \uc778\ucc9c \ubb3c\ub958\uc13c\ud130\uc5d0\uc11c \ubc29\ubb38 \uc218\ub839 \uac00\ub2a5\ud569\ub2c8\ub2e4. \uacb0\uc81c \uc2dc \ubc29\ubb38 \uc218\ub839\uc744 \uc120\ud0dd\ud558\uc2dc\uba74 \uc900\ube44 \uc644\ub8cc \uc2dc \uc548\ub0b4\ub4dc\ub9bd\ub2c8\ub2e4 \u2014 \ubcf4\ud1b5 2~4\uc2dc\uac04 \uc18c\uc694\ub429\ub2c8\ub2e4."
         ),
         (
-            "Can I pick up an order instead of having it shipped?",
-            "Yes! We offer Will Call Pickup at our distribution centers in Portland, Chicago, Atlanta, and Toronto. Select it at checkout and you'll be notified when it's ready \u2014 usually 2-4 hours."
+            "\ubb3c\ub958\uc13c\ud130\ub294 \uc5b4\ub514\uc5d0 \uc788\ub098\uc694?",
+            "\ucd1d 4\uacf3\uc758 \ubb3c\ub958\uc13c\ud130\uac00 \uc788\uc2b5\ub2c8\ub2e4: \uc11c\uc6b8 \ubcf8\uc0ac, \ubd80\uc0b0 \ubb3c\ub958\uc13c\ud130, \uad11\uc8fc \ubb3c\ub958\uc13c\ud130, \uc778\ucc9c \ubb3c\ub958\uc13c\ud130."
         ),
         (
-            "Where are your distribution centers located?",
-            "We have four distribution centers: Portland, OR (headquarters), Schaumburg, IL (Chicago area), Norcross, GA (Atlanta area), and Mississauga, ON (Toronto area)."
+            "\ube60\ub978 \ubc30\uc1a1\uc774\ub098 \uc775\uc77c \ubc30\uc1a1\ub3c4 \uc788\ub098\uc694?",
+            "\ub124! \ube60\ub978 \ubc30\uc1a1\uc740 15,950\uc6d0 (2~3\uc77c), \ud2b9\uae09 \ubc30\uc1a1\uc740 24,950\uc6d0 (1~2\uc77c), \uc775\uc77c \ubc30\uc1a1\uc740 39,950\uc6d0 (\ub2e4\uc74c \uc601\uc5c5\uc77c)\uc785\ub2c8\ub2e4. \ud2b9\uae09\uacfc \uc775\uc77c \ubc30\uc1a1\uc740 \uac01\uac01 KST \uc624\ud6c4 2\uc2dc\uc640 \uc815\uc624\uae4c\uc9c0 \uc8fc\ubb38\ud558\uc154\uc57c \ud569\ub2c8\ub2e4."
         ),
         (
-            "Do you offer expedited or overnight shipping?",
-            "Yes! Expedited is $15.95 (2-3 days), Express is $24.95 (1-2 days), and Overnight is $39.95 (next business day). Express and Overnight require ordering by 2:00 PM and 12:00 PM EST respectively."
+            "\ud0dd\ubc30\uac00 \ud30c\uc190\ub418\uc5b4 \ub3c4\ucc29\ud558\uba74 \uc5b4\ub5bb\uac8c \ud558\ub098\uc694?",
+            "\ud30c\uc190 \ubd80\uc704\ub97c \uc0ac\uc9c4 \ucd2c\uc601\ud558\uc2dc\uace0 48\uc2dc\uac04 \uc774\ub0b4\uc5d0 fulfillment@officeflow.com \uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694. \uc989\uc2dc \uad50\ud658 \ub610\ub294 \ud658\ubd88 \ucc98\ub9ac\ud574 \ub4dc\ub9bd\ub2c8\ub2e4 \u2014 \ud30c\uc190 \uc0c1\ud488\uc744 \uba3c\uc800 \ubc18\uc1a1\ud558\uc2e4 \ud544\uc694\ub294 \uc5c6\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "What happens if my package arrives damaged?",
-            "Photograph the damage and contact us within 48 hours at fulfillment@officeflow.com. We'll arrange a replacement or refund immediately \u2014 you won't need to return the damaged item first."
+            "\ubc18\ud488 \ub300\uc2e0 \uad50\ud658\ub3c4 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\ubb3c\ub860\uc785\ub2c8\ub2e4! \uad50\ud658\ub3c4 \ubc18\ud488\uacfc \ub3d9\uc77c\ud55c \uc808\ucc28\ub85c \uc9c4\ud589\ub429\ub2c8\ub2e4 \u2014 returns@officeflow.com \uc5d0\uc11c RMA\ub97c \ubc1c\uae09\ubc1b\uc73c\uc2dc\uba74 \ub429\ub2c8\ub2e4. \ub2e4\ub978 \uc0c1\ud488\uc73c\ub85c \uad50\ud658 \uc2dc \ucc28\uc561\uc774 \ubc1c\uc0dd\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "Can I exchange an item instead of returning it?",
-            "Absolutely! Exchanges follow the same process as returns \u2014 you'll need an RMA from returns@officeflow.com. Price differences may apply if you're swapping for a different item."
+            "\uc8fc\ubb38 \ubc30\uc1a1 \uc870\ud68c\ub294 \uc5b4\ub5bb\uac8c \ud558\ub098\uc694?",
+            "\uc8fc\ubb38\uc774 \ucd9c\uace0\ub418\uba74 \uc1a1\uc7a5\ubc88\ud638\uac00 \uc774\uba54\uc77c\ub85c \ubc1c\uc1a1\ub429\ub2c8\ub2e4. www.officeflow.com/track \uc5d0\uc11c \uc5b8\uc81c\ub4e0 \uc870\ud68c \uac00\ub2a5\ud558\uace0, \ub3c4\uc6c0\uc774 \ud544\uc694\ud558\uc2dc\uba74 fulfillment@officeflow.com \uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "How do I track my order?",
-            "You'll get a tracking number by email when your order ships. You can check status anytime at www.officeflow.com/track, or contact fulfillment@officeflow.com for help."
+            "\uc5b4\ub5a4 \uacb0\uc81c \uc218\ub2e8\uc744 \uc0ac\uc6a9\ud560 \uc218 \uc788\ub098\uc694?",
+            "\uacb0\uc81c \ubc0f \uccad\uad6c \uad00\ub828 \ubb38\uc758\ub294 \uc815\uc0b0\ud300(accounts@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 4\ubc88)\uc73c\ub85c \uc548\ub0b4\ud574 \ub4dc\ub9bd\ub2c8\ub2e4. \ubaa8\ub4e0 \uacb0\uc81c \uc218\ub2e8 \uad00\ub828 \uc0ac\ud56d\uc744 \ucc98\ub9ac\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "What payment methods do you accept?",
-            "For payment and billing questions, I'd direct you to our Accounts team at accounts@officeflow.com or 1-800-OFFICE-1 ext. 4. They handle all payment method details."
+            "\uccad\uad6c\uc9c0 \uc8fc\uc18c\ub97c \ubcc0\uacbd\ud558\uace0 \uc2f6\uc5b4\uc694. \uc5b4\ub5bb\uac8c \ud558\ub098\uc694?",
+            "\uccad\uad6c\uc9c0 \uc8fc\uc18c \ubcc0\uacbd \uac19\uc740 \uacc4\uc815 \uc815\ubcf4 \ubcc0\uacbd\uc740 \uc815\uc0b0\ud300\uc5d0\uc11c \ucc98\ub9ac\ud569\ub2c8\ub2e4. accounts@officeflow.com \uc73c\ub85c \uba54\uc77c \ubcf4\ub0b4\uc2dc\uac70\ub098 1588-0000 \ub0b4\uc120 4\ubc88\uc73c\ub85c \uc804\ud654 \uc8fc\uc138\uc694."
         ),
         (
-            "I need to update my billing address. How?",
-            "Account changes like billing address updates go through our Accounts team. Email accounts@officeflow.com or call 1-800-OFFICE-1 ext. 4."
+            "\uacf5\ud734\uc77c\uc5d0\ub294 \ud734\ubb34\uc778\uac00\uc694?",
+            "\uc124\ub0a0, \ucd94\uc11d, \uc5b4\ub9b0\uc774\ub0a0, \uad11\ubcf5\uc808, \uac1c\ucc9c\uc808, \ud55c\uae00\ub0a0, \uc131\ud0c4\uc808\uc5d0 \ud734\ubb34\uc785\ub2c8\ub2e4. \uba85\uc808 \uc804\ub0a0\uacfc \uc131\ud0c4\uc808 \uc774\ube0c\uc5d0\ub294 \ub2e8\ucd95 \uc601\uc5c5(KST \uc624\ud6c4 2\uc2dc\uae4c\uc9c0)\uc785\ub2c8\ub2e4."
         ),
         (
-            "Are you closed on holidays?",
-            "We're closed on New Year's Day, Memorial Day, July 4th, Labor Day, Thanksgiving, and Christmas. We have limited hours on the day before Thanksgiving, Christmas Eve, and New Year's Eve (until 2 PM EST)."
+            "\uc800\ub294 {company}\uc758 {name}\uc785\ub2c8\ub2e4. \uae30\uc5c5 \uacc4\uc815\uc758 \ubc30\uc1a1 \uc815\ucc45\uc740 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {company}\ucc98\ub7fc \uae30\uc5c5 \uacc4\uc815 \uace0\uac1d\uc740 \ub9de\ucda4 \ubc30\uc1a1 \uc694\uae08\uacfc \uc8fc\uc694 \uc9c0\uc5ed \uc804\uc6a9 \ubc30\uc1a1 \ub77c\uc778\uc744 \uc774\uc6a9\ud558\uc2e4 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uc790\uc138\ud55c \uc0ac\ud56d\uc740 \ub2f4\ub2f9 \ub9e4\ub2c8\uc800\uc5d0\uac8c \ubb38\uc758\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "My name is {name} from {company}. What's your shipping policy for business accounts?",
-            "Hi {name}! Business account customers at {company} may have access to custom shipping rates and dedicated delivery routes in major metro areas. Contact your account manager for specifics!"
+            "\uae30\uc5c5 \uacc4\uc815\uc740 \uc5b4\ub5bb\uac8c \uac1c\uc124\ud558\ub098\uc694?",
+            "\uae30\uc5c5 \uacc4\uc815 \uac1c\uc124\uc740 \uc815\uc0b0\ud300(accounts@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 4\ubc88)\uc73c\ub85c \ubb38\uc758 \uc8fc\uc138\uc694. \uac1c\uc124 \uc808\ucc28\ub97c \ub3c4\uc640\ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "How do I set up a business account?",
-            "To set up a business account, reach out to our Accounts team at accounts@officeflow.com or 1-800-OFFICE-1 ext. 4. They'll get you set up."
+            "\uac1c\ubd09\ud55c \uc0c1\ud488\ub3c4 \ubc18\ud488 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\uc6d0\ub798 \ud3ec\uc7a5\uc774 \uc788\ub294 \ub300\ubd80\ubd84\uc758 \uac1c\ubd09 \uc0c1\ud488\uc740 30\uc77c \uc774\ub0b4 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ub2e4\ub9cc \uc704\uc0dd\uc0c1\uc758 \uc774\uc720\ub85c \uac1c\ubd09\ud55c \uc885\uc774 \ubb36\uc74c\uc740 \ubc18\ud488 \ubd88\uac00\uc774\uace0, \ub9de\ucda4 \uc778\uc1c4 \uc0c1\ud488\uc774\ub098 \ud2b9\uac00 \uc0c1\ud488\ub3c4 \ubc18\ud488 \ub300\uc0c1\uc774 \uc544\ub2d9\ub2c8\ub2e4."
         ),
         (
-            "What's the policy on returning opened items?",
-            "Most opened items in original packaging can be returned within 30 days. However, opened paper reams cannot be returned due to hygiene standards, and custom-printed or Final Sale items are ineligible."
+            "\uc8fc\ubb38\ud55c \uac83\uacfc \ub2e4\ub978 \uc0c1\ud488\uc744 \ubc1b\uc558\uc5b4\uc694. \uc5b4\ub5bb\uac8c \ud574\uc57c \ud558\ub098\uc694?",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! fulfillment@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638\uc640 \ud568\uaed8 \ubc1b\uc73c\uc2e0 \uc0c1\ud488 \ubc0f \uc8fc\ubb38\ud558\uc2e0 \uc0c1\ud488\uc758 \ub0b4\uc6a9\uc744 \ubcf4\ub0b4\uc8fc\uc138\uc694. \ub2f9\uc77c \ub610\ub294 \ub2e4\uc74c \uc601\uc5c5\uc77c\uc5d0 \uc815\ud655\ud55c \uc0c1\ud488\uc744 \ubc1c\uc1a1\ud574 \ub4dc\ub9ac\uace0 \ubc18\ud488 \ub77c\ubca8\ub3c4 \ud568\uaed8 \uc81c\uacf5\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "I received the wrong items in my order. What should I do?",
-            "I'm sorry about that! Contact fulfillment@officeflow.com with your order number and details about what you received vs. what you ordered. They'll ship the correct items same or next business day and provide a return label."
+            "\ub300\ub7c9 \uc8fc\ubb38 \uc2dc \ud560\uc778\uc774\ub098 \uac00\uaca9 \ud61c\ud0dd\uc774 \uc788\ub098\uc694?",
+            "\ub300\ub7c9 \uc8fc\ubb38 \uac00\uaca9\uc740 sales@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 2\ubc88\uc73c\ub85c \uc601\uc5c5\ud300\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694. \ub300\ub7c9 \uc8fc\ubb38 \uacac\uc801\uc744 \uc548\ub0b4\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "Do you offer bulk pricing or discounts for large orders?",
-            "For bulk pricing, contact our sales team at sales@officeflow.com or 1-800-OFFICE-1 ext. 2. They can provide quotes for large orders."
+            "\uc8fc\ubb38 \ud6c4 \ubc30\uc1a1\uc9c0 \uc8fc\uc18c \ubcc0\uacbd \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\ucd9c\uace0 \uc804\uc774\ub77c\uba74 \uc989\uc2dc \uc601\uc5c5\ud300\uc5d0 \uc5f0\ub77d \uc8fc\uc138\uc694 \u2014 \uc8fc\ubb38 \ud6c4 2\uc2dc\uac04 \uc774\ub0b4\uc5d0\ub294 \ubb34\ub8cc \ubcc0\uacbd\uc774 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ucd9c\uace0 \ud6c4\uc5d0\ub294 fulfillment \ud300\uc5d0\uc11c \uc7ac\ubc30\uc1a1 \ucc98\ub9ac\ud574 \ub4dc\ub9ac\ub294\ub370 10,000~15,000\uc6d0\uc758 \uc218\uc218\ub8cc\uac00 \ubd80\uacfc\ub429\ub2c8\ub2e4."
         ),
         (
-            "Can I change my shipping address after placing an order?",
-            "If the order hasn't shipped yet, contact the sales team immediately \u2014 changes are free within 2 hours of placement. After shipping, the fulfillment team may be able to reroute, though a $10-15 fee applies."
+            "\ud1a0\uc694\uc77c \ubc30\uc1a1\ub3c4 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\uc8fc\ub9d0\uc5d0\ub294 \ubb3c\ub958\uc13c\ud130\uac00 \uc6b4\uc601\ub418\uc9c0 \uc54a\uc544 \ud1a0\uc694\uc77c \ubc30\uc1a1\uc740 \uc81c\uacf5\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \ud2b9\uae09 \ubc30\uc1a1\uacfc \uc775\uc77c \ubc30\uc1a1\uc740 \uc6d4\uc694\uc77c~\ubaa9\uc694\uc77c\uc5d0\ub9cc \uc774\uc6a9 \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "Is there a way to get Saturday delivery?",
-            "Our distribution centers are closed on weekends, so Saturday delivery isn't available. Express and Overnight shipping are available Monday-Thursday only."
+            "\ubc18\ud488\ud300\uc5d0\ub294 \uc5b4\ub5bb\uac8c \uc5f0\ub77d\ud558\ub098\uc694?",
+            "\ubc18\ud488\ud300\uc740 returns@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 3\ubc88\uc73c\ub85c \uc5f0\ub77d \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud3c9\uc77c \uc624\uc804 8\uc2dc ~ \uc624\ud6c4 6\uc2dc (KST)\uc5d0 \uc751\ub300\ud558\uba70 4\uc601\uc5c5\uc2dc\uac04 \uc774\ub0b4\uc5d0 \ud68c\uc2e0\ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "How do I contact the returns department?",
-            "You can reach our Returns Department at returns@officeflow.com or 1-800-OFFICE-1 ext. 3. They're available Monday-Friday, 8:00 AM - 6:00 PM EST, and respond within 4 business hours."
+            "\uccad\uad6c\uc11c \uad00\ub828 \ubb38\uc758\ub294 \uc5b4\ub514\uc5d0 \ud574\uc57c \ud558\ub098\uc694?",
+            "\uccad\uad6c\uc11c \ubc0f \uacb0\uc81c \uad00\ub828 \ubb38\uc758\ub294 \uc815\uc0b0\ud300(accounts@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 4\ubc88)\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694. \ud3c9\uc77c \uc624\uc804 9\uc2dc ~ \uc624\ud6c4 5\uc2dc (KST)\uc5d0 \uc751\ub300\ud569\ub2c8\ub2e4."
         ),
         (
-            "I have a question about my invoice. Who do I talk to?",
-            "For invoice and billing questions, contact our Accounts team at accounts@officeflow.com or 1-800-OFFICE-1 ext. 4. They're available Monday-Friday, 9:00 AM - 5:00 PM EST."
+            "\ubc18\ud488 \ubc30\uc1a1\ube44\ub294 \ubb34\ub8cc\uc778\uac00\uc694?",
+            "\ubd88\ub7c9\ud488 \ubc18\ud488\uc774\ub098 \uc800\ud76c \uce21 \ubc30\uc1a1 \uc624\ub958\uc778 \uacbd\uc6b0 \ubc18\ud488 \ubc30\uc1a1\ube44\ub294 \ubb34\ub8cc\uc785\ub2c8\ub2e4. \uadf8 \uc678\uc5d0\ub294 \ubc18\ud488 \ubc30\uc1a1\ube44\ub97c \uace0\uac1d\ub2d8\uc774 \ubd80\ub2f4\ud558\uc154\uc57c \ud569\ub2c8\ub2e4."
         ),
         (
-            "Is return shipping free?",
-            "Return shipping is free if the item is defective or we shipped the wrong item. Otherwise, return shipping costs are the customer's responsibility."
+            "\ub3c4\uc6c0\uc744 \ubc1b\uc73c\ub824\uba74 \uc5b4\ub514\ub85c \uc804\ud654\ud558\uba74 \ub418\ub098\uc694?",
+            "\uba54\uc778 \uc804\ud654\ubc88\ud638\ub294 1588-0000 \uc785\ub2c8\ub2e4. \ubd80\uc11c\ubcc4 \ub0b4\uc120\ubc88\ud638: \uace0\uac1d \uc11c\ube44\uc2a4 1\ubc88, \uc601\uc5c5 2\ubc88, \ubc18\ud488 3\ubc88, \uc815\uc0b0 4\ubc88, \ubb3c\ub958 5\ubc88, \uae30\uc220 \uc9c0\uc6d0 6\ubc88."
         ),
         (
-            "What's the number I can call for help?",
-            "Our main number is 1-800-OFFICE-1. For specific departments: Customer Service ext. 1, Sales ext. 2, Returns ext. 3, Accounts ext. 4, Fulfillment ext. 5, Tech Support ext. 6."
+            "\ubc18\ud488\uc6a9 RMA \ubc88\ud638\ub294 \uc5b4\ub5bb\uac8c \ubc1b\ub098\uc694?",
+            "\ubc18\ud488\ud300(returns@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 3\ubc88)\uc73c\ub85c \uc8fc\ubb38\ubc88\ud638\uc640 \ubc18\ud488 \uc0ac\uc720\ub97c \ubcf4\ub0b4\uc8fc\uc2dc\uba74 4\uc601\uc5c5\uc2dc\uac04 \uc774\ub0b4\uc5d0 RMA\uac00 \ubc1c\uae09\ub429\ub2c8\ub2e4."
         ),
         (
-            "How do I get an RMA number for a return?",
-            "Contact our Returns Department at returns@officeflow.com or 1-800-OFFICE-1 ext. 3 with your order number and reason for the return. They'll issue an RMA within 4 business hours."
+            "\uc0ac\uc11c\ud568\uc73c\ub85c\ub3c4 \ubc30\uc1a1 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "\ub124, \ub300\ubd80\ubd84\uc758 \uc0c1\ud488\uc740 \uc77c\ubc18 \ubc30\uc1a1\uc73c\ub85c \uc0ac\uc11c\ud568 \ubc30\uc1a1\uc774 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ubd80\ud53c\uac00 \ud06c\uac70\ub098 \uc704\ud5d8\ubb3c\ud488\uc740 \uc77c\ubd80 \uc81c\ud55c\uc774 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "Do you ship to PO boxes?",
-            "Yes, we ship to PO Boxes for most items using standard shipping. Some restrictions apply for large or hazardous items."
+            "\ud68c\uc0ac \uc5f0\ub77d\ucc98\ub294 \uc5b4\ub514\uc11c \ud655\uc778\ud560 \uc218 \uc788\ub098\uc694?",
+            "\uba54\uc778 \uc804\ud654\ubc88\ud638\ub294 1588-0000 \uc785\ub2c8\ub2e4. \ubcf8\uc0ac\ub294 \uc11c\uc6b8\ud2b9\ubcc4\uc2dc \uac15\ub0a8\uad6c \ud14c\ud5e4\ub780\ub85c 123 \uc785\ub2c8\ub2e4. \uc774\uba54\uc77c\uc740 info@officeflow.com, \uc6f9\uc0ac\uc774\ud2b8\ub294 www.officeflow.com \uc785\ub2c8\ub2e4."
         ),
         (
-            "Where can I find your company contact information?",
-            "Our main number is 1-800-OFFICE-1. Our headquarters is at 1234 Commerce Way, Portland, OR 97220. You can also email info@officeflow.com or visit www.officeflow.com."
+            "\ud0dd\ubc30\uac00 \ubc30\uc1a1 \uc644\ub8cc\ub418\uc5c8\ub2e4\uace0 \ub5b4\ub294\ub370 \ubabb \ubc1b\uc558\uc5b4\uc694. \uc5b4\ub5bb\uac8c \ud558\ub098\uc694?",
+            "fulfillment@officeflow.com \uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694. \ud0dd\ubc30\uc0ac\uc5d0 \ubd84\uc2e4 \uc2e0\uace0\ub97c \uc811\uc218\ud558\uace0 \ub300\uccb4\ud488\uc744 \ubc1c\uc1a1\ud574 \ub4dc\ub9bd\ub2c8\ub2e4. \ubd84\uc2e4 \uc2e0\uace0 \ucc98\ub9ac\ub294 \ubcf4\ud1b5 3~5\uc601\uc5c5\uc77c \uc18c\uc694\ub429\ub2c8\ub2e4."
         ),
         (
-            "What do I do if my package says delivered but I didn't get it?",
-            "Contact us at fulfillment@officeflow.com. We'll file a carrier claim and send a replacement. The claim process typically takes 3-5 business days."
+            "\uad50\ud658 \uc815\ucc45\uc5d0 \ub300\ud574 \uc54c\ub824\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uad50\ud658\uc740 \ud658\uc601\uc785\ub2c8\ub2e4! \ubc18\ud488\uacfc \ub3d9\uc77c\ud55c \uc808\ucc28\ub85c \uc9c4\ud589\ub429\ub2c8\ub2e4 \u2014 returns@officeflow.com \uc73c\ub85c RMA\ub97c \ubc1c\uae09\ubc1b\uc73c\uc138\uc694. \ucc28\uc561\uc774 \ubc1c\uc0dd\ud560 \uc218 \uc788\uace0, \ubc18\ud488 \ub3c4\ucc29 \ubc0f \uac80\uc218 \ud6c4\uc5d0 \uad50\ud658 \uc0c1\ud488\uc774 \ubc1c\uc1a1\ub429\ub2c8\ub2e4."
         ),
         (
-            "Can you tell me about your exchange policy?",
-            "We're happy to do exchanges! Same process as returns \u2014 contact returns@officeflow.com for an RMA. Price differences may apply. Exchange items ship once we receive and inspect the return."
+            "\uc548\ub155\ud558\uc138\uc694, \uc800\ub294 {name}\uc785\ub2c8\ub2e4. \ubd88\ub7c9\ud488 \ubc18\ud488 \uc815\ucc45\uc5d0 \ub300\ud574 \uc54c\uace0 \uc2f6\uc5b4\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! \ubd88\ub7c9\ud488\uc740 30\uc77c\uc774 \uc9c0\ub098\ub3c4 \uc5b8\uc81c\ub4e0 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4. returns@officeflow.com \uc73c\ub85c \ubd88\ub7c9 \ubd80\uc704 \uc0ac\uc9c4\uacfc \ud568\uaed8 \uba54\uc77c \uc8fc\uc138\uc694. \ubb34\ub8cc \ubc18\ud488 \ub77c\ubca8\uc744 \ubcf4\ub0b4\ub4dc\ub9ac\uba70 \ubc18\ud488 \ubc30\uc1a1\ube44\ub3c4 \uc800\ud76c\uac00 \ubd80\ub2f4\ud569\ub2c8\ub2e4."
         ),
         (
-            "Hi, this is {name}. I'm trying to understand your return policy for defective items.",
-            "Hi {name}! Defective items can be returned at any time, even after the 30-day window. Email returns@officeflow.com with photos of the defect. They'll send a prepaid return label, and return shipping is on us."
-        ),
-        (
-            "What are the shipping restrictions?",
-            "Hazardous materials (certain markers, adhesives) must ship ground only. Oversized items like furniture need freight shipping. Items over 50 lbs may incur freight charges. No aerosols or flammables on international shipments."
+            "\ubc30\uc1a1 \uc81c\ud55c \uc0ac\ud56d\uc774 \uc788\ub098\uc694?",
+            "\uc704\ud5d8\ubb3c(\uc77c\ubd80 \ub9c8\uce74, \uc811\ucc29\uc81c \ub4f1)\uc740 \uc721\ub85c \ubc30\uc1a1\ub9cc \uac00\ub2a5\ud558\uace0, \uac00\uad6c\ucc98\ub7fc \ubd80\ud53c\uac00 \ud070 \uc0c1\ud488\uc740 \ud654\ubb3c \ubc30\uc1a1\uc73c\ub85c \ucc98\ub9ac\ub429\ub2c8\ub2e4. 22kg \uc774\uc0c1 \uc0c1\ud488\uc740 \ud654\ubb3c \ube44\uc6a9\uc774 \ucd94\uac00\ub420 \uc218 \uc788\uace0, \ud574\uc678 \ubc30\uc1a1 \uc2dc \uc5d0\uc5b4\ub85c\uc878\uc774\ub098 \uc778\ud654\uc131 \ubb3c\uc9c8\uc740 \ubd88\uac00\ud569\ub2c8\ub2e4."
         ),
     ]
     pairs = []
@@ -459,167 +486,167 @@ def _policy_questions():
 
 
 def _out_of_scope_questions():
-    """Return list of (question, response) tuples for out_of_scope category."""
+    """out_of_scope \uce74\ud14c\uace0\ub9ac: Emma\uac00 \ub3c4\uc640\uc904 \uc218 \uc5c6\ub294 \ubc94\uc704 \uc678 \uc9c8\ubb38 (\uc9c8\ubb38, \uc751\ub2f5) \ud29c\ud50c \ub9ac\uc2a4\ud2b8 \ubc18\ud658."""
     templates = [
         (
-            "Can you help me write a cover letter?",
-            "I appreciate you reaching out, but I'm only able to help with OfficeFlow product and service questions. For cover letter help, you might try a career services site. Is there anything office-supply related I can assist with?"
+            "\uc790\uae30\uc18c\uac1c\uc11c \uc791\uc131 \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubb38\uc758 \uc8fc\uc154\uc11c \uac10\uc0ac\ud569\ub2c8\ub2e4\ub9cc, \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uad00\ub828 \ubb38\uc758\ub9cc \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uc790\uae30\uc18c\uac1c\uc11c\ub294 \ucee4\ub9ac\uc5b4 \uad00\ub828 \uc0ac\uc774\ud2b8\ub97c \uc774\uc6a9\ud574\ubcf4\uc138\uc694. \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc77c\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "What's the weather like in Portland today?",
-            "I wish I could help with that, but I'm limited to OfficeFlow-related questions! For weather, try your favorite weather app. Anything else I can help with regarding our products or services?"
+            "\uc624\ub298 \uc11c\uc6b8 \ub0a0\uc528 \uc5b4\ub54c\uc694?",
+            "\ub3c4\uc640\ub4dc\ub9ac\uace0 \uc2f6\uc9c0\ub9cc \uc800\ub294 OfficeFlow \uad00\ub828 \ubb38\uc758\ub85c \ud55c\uc815\ub418\uc5b4 \uc788\uc5b4\uc694! \ub0a0\uc528\ub294 \uc990\uaca8 \uc4f0\uc2dc\ub294 \uc571\uc5d0\uc11c \ud655\uc778\ud574 \ubcf4\uc138\uc694. \uc800\ud76c \uc0c1\ud488\uc774\ub098 \uc11c\ube44\uc2a4 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uac8c \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you recommend a good restaurant near your Portland office?",
-            "That's a fun question, but unfortunately I can only help with OfficeFlow product and service inquiries. Yelp or Google Maps would be great for restaurant recs! Anything supply-related I can help with?"
+            "\ubcf8\uc0ac \uadfc\ucc98\uc5d0 \uad1c\ucc2e\uc740 \uc2dd\ub2f9 \ucd94\ucc9c\ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc7ac\ubbf8\uc788\ub294 \uc9c8\ubb38\uc778\ub370\uc694, \uc544\uc27d\uac8c\ub3c4 \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uad00\ub828 \ubb38\uc758\ub9cc \uc751\ub300\ud560 \uc218 \uc788\uc5b4\uc694. \uc2dd\ub2f9 \ucd94\ucc9c\uc740 \ub124\uc774\ubc84 \uc9c0\ub3c4\ub098 \uad6c\uae00 \uc9c0\ub3c4\uc5d0\uc11c \ucc3e\uc544\ubcf4\uc2dc\ub294 \uac8c \uc88b\uaca0\uc5b4\uc694! \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc77c\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "I need help with my taxes. Can you help?",
-            "I'm not able to help with taxes, but I'd recommend a CPA or tax preparation service. I'm here if you need anything related to office supplies or our services!"
+            "\uc138\ubb34 \uad00\ub828\ud574\uc11c \ub3c4\uc6c0\uc774 \ud544\uc694\ud574\uc694. \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc138\ubb34\ub294 \uc800\ud76c\uac00 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc5c6\ub294 \ubd80\ubd84\uc774\uace0, \uc138\ubb34\uc0ac\ub098 \uc138\ubb34 \ub300\ud589 \uc11c\ube44\uc2a4\ub97c \ucd94\ucc9c\ub4dc\ub9bd\ub2c8\ub2e4. \uc0ac\ubb34\uc6a9\ud488\uc774\ub098 \uc800\ud76c \uc11c\ube44\uc2a4 \uad00\ub828\ud574\uc11c \ud544\uc694\ud558\uc2e0 \uac8c \uc788\uc73c\uba74 \uc5b8\uc81c\ub4e0 \ub9d0\uc500\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "Do you sell office furniture?",
-            "We focus on office supplies, paper products, writing instruments, and desk accessories. We don't currently carry furniture. For specific product questions, I'm happy to help!"
+            "\uc0ac\ubb34\uc6a9 \uac00\uad6c\ub3c4 \ud310\ub9e4\ud558\ub098\uc694?",
+            "\uc800\ud76c\ub294 \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ud544\uae30\uad6c, \ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac \uc704\uc8fc\ub85c \ucde8\uae09\ud558\uace0 \uc788\uc5b4\uc694. \uac00\uad6c\ub294 \ud604\uc7ac \ucde8\uae09\ud558\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \ub2e4\ub978 \uc0c1\ud488 \uad00\ub828 \ubb38\uc758\ub294 \uc5b8\uc81c\ub4e0 \ub3c4\uc640\ub4dc\ub9b4\uac8c\uc694!"
         ),
         (
-            "Can you fix my computer? It keeps crashing.",
-            "I'm sorry about the tech troubles, but I can only help with OfficeFlow products and services. For computer issues, I'd suggest contacting your IT department or a local tech support service."
+            "\uc81c \ucef4\ud4e8\ud130 \uc880 \uace0\uccd0\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694? \uacc4\uc18d \uba48\ucdb0\uc694.",
+            "\uae30\uae30 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud55c\ub370, \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\ub9cc \uc751\ub300\ud560 \uc218 \uc788\uc5b4\uc694. \ucef4\ud4e8\ud130 \ubb38\uc81c\ub294 \uc0ac\ub0b4 IT \ud300\uc774\ub098 \uac00\uae4c\uc6b4 PC \uc11c\ube44\uc2a4 \uc13c\ud130\uc5d0 \ubb38\uc758\ud558\uc2dc\ub294 \uac8c \uc88b\uaca0\uc5b4\uc694."
         ),
         (
-            "What's the stock price of OfficeFlow?",
-            "I'm not able to provide financial or stock information. For investor relations, you could check our corporate website or contact corporate@officeflow.com. Anything product-related I can help with?"
+            "OfficeFlow \uc8fc\uac00\uac00 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "\uae08\uc735\uc774\ub098 \uc8fc\uac00 \uc815\ubcf4\ub294 \uc548\ub0b4\ud574 \ub4dc\ub9b4 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4. IR \uad00\ub828 \ubb38\uc758\ub294 \ud68c\uc0ac \uc6f9\uc0ac\uc774\ud2b8\ub97c \ud655\uc778\ud558\uc2dc\uac70\ub098 corporate@officeflow.com \uc73c\ub85c \uc5f0\ub77d\ud574 \uc8fc\uc138\uc694. \uc0c1\ud488 \uad00\ub828 \ubb38\uc758\ub294 \uc5b8\uc81c\ub4e0 \ub3c4\uc640\ub4dc\ub9b4\uac8c\uc694!"
         ),
         (
-            "Can you translate this document for me?",
-            "Translation is outside my area, I'm afraid. I'm here for OfficeFlow product and service questions. For translation, try Google Translate or a professional translation service!"
+            "\uc774 \ubb38\uc11c \uc880 \ubc88\uc5ed\ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubc88\uc5ed\uc740 \uc81c \ub2f4\ub2f9 \ubc94\uc704\uac00 \uc544\ub2c8\uc5d0\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4 \ubb38\uc758\ub97c \uc751\ub300\ud569\ub2c8\ub2e4. \ubc88\uc5ed\uc740 \uad6c\uae00 \ubc88\uc5ed\uc774\ub098 \uc804\ubb38 \ubc88\uc5ed \uc11c\ube44\uc2a4\ub97c \uc774\uc6a9\ud574 \ubcf4\uc138\uc694!"
         ),
         (
-            "I want to apply for a job at OfficeFlow. How do I do that?",
-            "Thanks for your interest in working with us! Job applications aren't something I handle, though. Check our website for a careers page, or email corporate@officeflow.com. Can I help with anything supply-related?"
+            "OfficeFlow \uc5d0 \uc785\uc0ac\ud558\uace0 \uc2f6\uc740\ub370 \uc5b4\ub5bb\uac8c \uc9c0\uc6d0\ud558\ub098\uc694?",
+            "\uc800\ud76c\uc640 \ud568\uaed8 \uc77c\ud558\uace0 \uc2f6\uc5b4 \ud574\uc8fc\uc154\uc11c \uac10\uc0ac\ud569\ub2c8\ub2e4! \ucc44\uc6a9 \uc9c0\uc6d0\uc740 \uc81c\uac00 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\ub294 \uc601\uc5ed\uc774 \uc544\ub2c8\uc5d0\uc694. \ud68c\uc0ac \ucc44\uc6a9 \ud398\uc774\uc9c0\ub97c \ud655\uc778\ud558\uc2dc\uac70\ub098 corporate@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc138\uc694. \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc77c\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you book a meeting room for me?",
-            "I'm not able to book meeting rooms \u2014 I'm specialized in OfficeFlow product and service support. You'd want to check with your office administrator for room bookings. Need anything else?"
+            "\ud68c\uc758\uc2e4 \uc608\uc57d \uc880 \ud574\uc8fc\uc2e4 \uc218 \uc788\uc5b4\uc694?",
+            "\ud68c\uc758\uc2e4 \uc608\uc57d\uc740 \uc81c\uac00 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc5c6\uc5b4\uc694 \u2014 \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uc9c0\uc6d0 \uc804\ubb38\uc774\uac70\ub4e0\uc694. \ud68c\uc758\uc2e4 \uc608\uc57d\uc740 \uc0ac\ub0b4 \ucd1d\ubb34 \ub2f4\ub2f9\uc790\ubd84\uaed8 \ubb38\uc758\ud574 \ubcf4\uc138\uc694. \ub2e4\ub978 \ub3c4\uc6c0 \ud544\uc694\ud55c \uac8c \uc788\ub098\uc694?"
         ),
         (
-            "What's the best laptop for office work?",
-            "Great question, but electronics and laptops are outside our product range. We focus on office supplies and paper products. For laptop recommendations, I'd suggest a tech review site. Anything else I can help with?"
+            "\uc5c5\ubb34\uc6a9\uc73c\ub85c \uc5b4\ub5a4 \ub178\ud2b8\ubd81\uc774 \uac00\uc7a5 \uc88b\uc744\uae4c\uc694?",
+            "\uc88b\uc740 \uc9c8\ubb38\uc774\uc9c0\ub9cc \uc804\uc790\uae30\uae30\uc640 \ub178\ud2b8\ubd81\uc740 \uc800\ud76c \ucde8\uae09 \ubc94\uc704 \ubc16\uc774\uc5d0\uc694. \uc800\ud76c\ub294 \uc0ac\ubb34\uc6a9\ud488\uacfc \uc885\uc774\ub958\uc5d0 \uc9d1\uc911\ud558\uace0 \uc788\uc5b4\uc694. \ub178\ud2b8\ubd81 \ucd94\ucc9c\uc740 IT \ub9ac\ubdf0 \uc0ac\uc774\ud2b8\ub97c \ucc38\uace0\ud574 \ubcf4\uc138\uc694. \ub2e4\ub978 \ub3c4\uc6c0 \ud544\uc694\ud55c \uac8c \uc788\ub098\uc694?"
         ),
         (
-            "Can you help me set up my email?",
-            "Email setup is outside my expertise \u2014 I'm here for OfficeFlow product and service questions. Your IT department or email provider's support would be the best bet!"
+            "\uc774\uba54\uc77c \uc124\uc815 \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc774\uba54\uc77c \uc124\uc815\uc740 \uc81c \uc804\ubb38 \ubd84\uc57c\uac00 \uc544\ub2c8\uc5d0\uc694 \u2014 \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4 \ubb38\uc758\ub97c \ub3c4\uc640\ub4dc\ub9bd\ub2c8\ub2e4. \uc0ac\ub0b4 IT \ud300\uc774\ub098 \uc774\uba54\uc77c \uc11c\ube44\uc2a4 \uc81c\uacf5\uc5c5\uccb4 \uc9c0\uc6d0\ud300\uc5d0 \ubb38\uc758\ud558\uc2dc\ub294 \uac8c \uc88b\uaca0\uc5b4\uc694!"
         ),
         (
-            "Tell me a joke.",
-            "Ha! I appreciate the request, but I'm best at helping with office supply questions. If you need any product info or have service questions, I'm your person!"
+            "\ub18d\ub2f4 \ud558\ub098 \ud574\uc8fc\uc138\uc694.",
+            "\ud558\ud558! \uc694\uccad\uc740 \uac10\uc0ac\ud558\uc9c0\ub9cc, \uc800\ub294 \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828 \ubb38\uc758\ub97c \uc81c\uc77c \uc798 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. \uc0c1\ud488 \uc815\ubcf4\ub098 \uc11c\ube44\uc2a4 \ubb38\uc758 \uc788\uc73c\uc2dc\uba74 \uc5b8\uc81c\ub4e0 \ub9d0\uc500\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "Can you order me a pizza?",
-            "I wish I could! But I'm limited to OfficeFlow products and services. For pizza, try your favorite delivery app. Need any staplers or sticky notes instead?"
+            "\ud53c\uc790 \uc8fc\ubb38 \uc880 \ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ud560 \uc218 \uc788\uc73c\uba74 \uc88b\uaca0\uc9c0\ub9cc\uc694! \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\ub85c \ud55c\uc815\ub418\uc5b4 \uc788\uc5b4\uc694. \ud53c\uc790\ub294 \uc990\uaca8 \uc4f0\uc2dc\ub294 \ubc30\ub2ec \uc571\uc744 \uc774\uc6a9\ud574 \ubcf4\uc138\uc694. \uc2a4\ud14c\uc774\ud50c\ub7ec\ub098 \ud3ec\uc2a4\ud2b8\uc787\uc774\ub77c\ub3c4 \ud544\uc694\ud558\uc2e0\uac00\uc694?"
         ),
         (
-            "What's the capital of France?",
-            "That would be Paris! But my real expertise is OfficeFlow products and services. Is there anything supply-related I can help with?"
+            "\ud504\ub791\uc2a4\uc758 \uc218\ub3c4\ub294 \uc5b4\ub514\uc778\uac00\uc694?",
+            "\ud30c\ub9ac\uc785\ub2c8\ub2e4! \ud558\uc9c0\ub9cc \uc81c \uc9c4\uc9dc \uc804\ubb38 \ubd84\uc57c\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\uc608\uc694. \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc77c\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you help me plan my vacation?",
-            "Vacation planning sounds fun, but it's outside my area. I'm here for OfficeFlow product and service support. Let me know if you need anything for the office!"
+            "\ud734\uac00 \uacc4\ud68d \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ud734\uac00 \uacc4\ud68d\uc740 \uc7ac\ubbf8\uc788\uc5b4 \ubcf4\uc774\ub294\ub370, \uc81c \ub2f4\ub2f9 \ubc94\uc704\uac00 \uc544\ub2c8\uc5d0\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uc9c0\uc6d0\uc744 \ub2f4\ub2f9\ud574\uc694. \uc0ac\ubb34\uc2e4\uc5d0 \ud544\uc694\ud55c \uac8c \uc788\uc73c\uba74 \ub9d0\uc500\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "Do you sell printers or toner cartridges?",
-            "We don't currently carry printers or toner cartridges \u2014 our focus is on office supplies, paper products, and desk accessories. Is there anything else from our catalog I can help with?"
+            "\ud504\ub9b0\ud130\ub098 \ud1a0\ub108 \uce74\ud2b8\ub9ac\uc9c0 \ud310\ub9e4\ud558\ub098\uc694?",
+            "\ud604\uc7ac \ud504\ub9b0\ud130\ub098 \ud1a0\ub108 \uce74\ud2b8\ub9ac\uc9c0\ub294 \ucde8\uae09\ud558\uc9c0 \uc54a\uace0 \uc788\uc5b4\uc694 \u2014 \uc800\ud76c\ub294 \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac\uc5d0 \uc9d1\uc911\ud558\uace0 \uc788\uc5b4\uc694. \uce74\ud0c8\ub85c\uadf8 \ub0b4\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \ub2e4\ub978 \uc0c1\ud488\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you help me with my car insurance claim?",
-            "I'm sorry, that's well outside my area! I can only help with OfficeFlow products and services. For insurance, you'd want to contact your insurance provider directly."
+            "\uc790\ub3d9\ucc28 \ubcf4\ud5d8 \uccad\uad6c \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc8c4\uc1a1\ud558\uc9c0\ub9cc \uadf8\uac74 \uc81c \uc601\uc5ed \ubc16\uc774\uc5d0\uc694! \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\ub9cc \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. \ubcf4\ud5d8\uc740 \uac00\uc785\ud558\uc2e0 \ubcf4\ud5d8\uc0ac\uc5d0 \uc9c1\uc811 \ubb38\uc758\ud574 \ubcf4\uc138\uc694."
         ),
         (
-            "I need advice on investing in the stock market.",
-            "Investment advice isn't something I can provide \u2014 I'm focused on OfficeFlow product support. A financial advisor would be the right person to talk to. Need any office supplies?"
+            "\uc8fc\uc2dd \ud22c\uc790 \uc870\uc5b8 \uc880 \ub4e3\uace0 \uc2f6\uc5b4\uc694.",
+            "\ud22c\uc790 \uc870\uc5b8\uc740 \uc81c\uac00 \ub4dc\ub9b4 \uc218 \uc788\ub294 \uac8c \uc544\ub2c8\uc5d0\uc694 \u2014 \uc800\ub294 OfficeFlow \uc0c1\ud488 \uc9c0\uc6d0\uc744 \ub2f4\ub2f9\ud574\uc694. \uc7ac\ubb34 \uc0c1\ub2f4\uc740 \uc7ac\ubb34 \uc124\uacc4\uc0ac\uc640 \uc0c1\uc758\ud558\uc2dc\ub294 \uac8c \uc88b\uaca0\uc5b4\uc694. \uc0ac\ubb34\uc6a9\ud488\uc740 \ud544\uc694\ud558\uc2e0\uac00\uc694?"
         ),
         (
-            "Can you write me a Python script?",
-            "I appreciate the ask, but coding is outside my scope! I'm here to help with OfficeFlow products and services. For programming help, try Stack Overflow or a developer community."
+            "\ud30c\uc774\uc36c \uc2a4\ud06c\ub9bd\ud2b8 \uc880 \uc9dc \uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubd80\ud0c1\uc740 \uac10\uc0ac\ud55c\ub370, \ucf54\ub529\uc740 \uc81c \ub2f4\ub2f9 \ubc94\uc704 \ubc16\uc774\uc5d0\uc694! \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4 \uad00\ub828 \ubb38\uc758\ub97c \ub3c4\uc640\ub4dc\ub824\uc694. \ud504\ub85c\uadf8\ub798\ubc0d\uc740 Stack Overflow \uac19\uc740 \uac1c\ubc1c\uc790 \ucee4\ubba4\ub2c8\ud2f0\ub97c \uc774\uc6a9\ud574 \ubcf4\uc138\uc694."
         ),
         (
-            "What's the best way to lose weight?",
-            "Health and fitness advice is outside my wheelhouse \u2014 I'd recommend talking to a healthcare professional. I'm great at office supply questions though! Anything I can help with?"
+            "\ub2e4\uc774\uc5b4\ud2b8\ud558\ub294 \uc88b\uc740 \ubc29\ubc95\uc774 \uc788\uc744\uae4c\uc694?",
+            "\uac74\uac15\uc774\ub098 \uc6b4\ub3d9 \uad00\ub828 \uc870\uc5b8\uc740 \uc81c \uc601\uc5ed\uc774 \uc544\ub2c8\uc5d0\uc694 \u2014 \uc758\uc0ac \uac19\uc740 \uc804\ubb38\uac00\uc640 \uc0c1\ub2f4\ud558\uc2dc\ub294 \uac78 \ucd94\ucc9c\ub4dc\ub824\uc694. \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\uc740 \uc798 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694! \ub3c4\uc6c0 \ud544\uc694\ud55c \uac8c \uc788\ub098\uc694?"
         ),
         (
-            "Can you order me an Uber?",
-            "I can't book rides, but I can help with office supplies! Is there anything OfficeFlow-related you need?"
+            "\ud0dd\uc2dc \uc880 \ubd88\ub7ec\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ud0dd\uc2dc \uc608\uc57d\uc740 \uc548 \ub418\uc9c0\ub9cc \uc0ac\ubb34\uc6a9\ud488\uc740 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694! OfficeFlow \uad00\ub828\ud574\uc11c \ud544\uc694\ud558\uc2e0 \uac8c \uc788\ub098\uc694?"
         ),
         (
-            "Do you sell coffee or snacks for the office?",
-            "We don't carry food or beverages \u2014 our catalog focuses on office supplies, paper products, and desk accessories. Is there something in that range I can help with?"
+            "\uc0ac\ubb34\uc2e4\uc6a9 \ucee4\ud53c\ub098 \uac04\uc2dd\ub3c4 \ud310\ub9e4\ud558\ub098\uc694?",
+            "\uc74c\uc2dd\uc774\ub098 \uc74c\ub8cc\ub294 \ucde8\uae09\ud558\uc9c0 \uc54a\uc544\uc694 \u2014 \uc800\ud76c \uce74\ud0c8\ub85c\uadf8\ub294 \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac \uc704\uc8fc\uc608\uc694. \uadf8 \ubc94\uc704 \uc548\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uac8c \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you summarize this article for me?",
-            "Article summarization is outside my scope. I'm here for OfficeFlow product and service support. Feel free to ask me about anything in our catalog!"
+            "\uc774 \uae30\uc0ac \uc694\uc57d \uc880 \ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uae30\uc0ac \uc694\uc57d\uc740 \uc81c \ub2f4\ub2f9 \ubc94\uc704 \ubc16\uc774\uc5d0\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uc9c0\uc6d0\uc744 \ub2f4\ub2f9\ud574\uc694. \uce74\ud0c8\ub85c\uadf8\uc5d0 \uc788\ub294 \uc0c1\ud488 \uad00\ub828\ud574\uc11c \uc5b8\uc81c\ub4e0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694!"
         ),
         (
-            "What's the best streaming service right now?",
-            "Entertainment recommendations are outside my area! I'm focused on OfficeFlow products and services. Let me know if you need anything for the office."
+            "\uc9c0\uae08 \uac00\uc7a5 \uc88b\uc740 OTT \uc11c\ube44\uc2a4\uac00 \ubb50\uc608\uc694?",
+            "\uc5d4\ud130\ud14c\uc778\uba3c\ud2b8 \ucd94\ucc9c\uc740 \uc81c \uc601\uc5ed \ubc16\uc774\uc5d0\uc694! \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\ub97c \ub2f4\ub2f9\ud574\uc694. \uc0ac\ubb34\uc2e4\uc5d0 \ud544\uc694\ud55c \uac8c \uc788\uc73c\uba74 \ub9d0\uc500\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "Can you help me move to a new apartment?",
-            "I can't help with moving, but if you need packing tape or labels for the move, we've got you covered! Anything office-supply related I can assist with?"
+            "\uc774\uc0ac \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc774\uc0ac\ub294 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc5c6\uc9c0\ub9cc, \uc774\uc0ac\uc6a9 \ubc15\uc2a4 \ud14c\uc774\ud504\ub098 \ub77c\ubca8\uc774 \ud544\uc694\ud558\uc2dc\uba74 \uc800\ud76c\uac00 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694! \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc77c\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Do you sell cleaning supplies?",
-            "Cleaning supplies aren't in our current catalog \u2014 we specialize in office supplies, paper products, writing instruments, and desk accessories. Need anything from those categories?"
+            "\uccad\uc18c\uc6a9\ud488\ub3c4 \ud310\ub9e4\ud558\ub098\uc694?",
+            "\uccad\uc18c\uc6a9\ud488\uc740 \ud604\uc7ac \uce74\ud0c8\ub85c\uadf8\uc5d0 \uc5c6\uc5b4\uc694 \u2014 \uc800\ud76c\ub294 \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ud544\uae30\uad6c, \ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac \uc804\ubb38\uc774\uc5d0\uc694. \ud574\ub2f9 \uce74\ud14c\uace0\ub9ac \ub0b4\uc5d0\uc11c \ud544\uc694\ud558\uc2e0 \uac8c \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you fix my printer?",
-            "Printer repair is outside my scope \u2014 I'm here for OfficeFlow product and service questions. For printer issues, I'd suggest contacting the manufacturer's support line."
+            "\ud504\ub9b0\ud130 \uc880 \uace0\uccd0\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ud504\ub9b0\ud130 \uc218\ub9ac\ub294 \uc81c \ub2f4\ub2f9\uc774 \uc544\ub2c8\uc5d0\uc694 \u2014 \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4 \ubb38\uc758\ub97c \ub3c4\uc640\ub4dc\ub824\uc694. \ud504\ub9b0\ud130 \ubb38\uc81c\ub294 \uc81c\uc870\uc0ac \uace0\uac1d\uc9c0\uc6d0\uc13c\ud130\uc5d0 \ubb38\uc758\ud558\uc2dc\ub294 \uac78 \ucd94\ucc9c\ub4dc\ub824\uc694."
         ),
         (
-            "I need legal advice about a contract. Can you help?",
-            "Legal advice is something I can't provide. I'd recommend consulting with an attorney. I'm here for OfficeFlow product and service questions \u2014 need anything from our catalog?"
+            "\uacc4\uc57d\uc11c \uad00\ub828 \ubc95\ub960 \uc790\ubb38\uc774 \ud544\uc694\ud574\uc694. \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubc95\ub960 \uc790\ubb38\uc740 \uc81c\uac00 \uc81c\uacf5\ud560 \uc218 \uc5c6\uc5b4\uc694. \ubcc0\ud638\uc0ac\uc640 \uc0c1\ub2f4\ud558\uc2dc\ub294 \uac78 \ucd94\ucc9c\ub4dc\ub9bd\ub2c8\ub2e4. \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \ubb38\uc758 \ub2f4\ub2f9\uc774\uc5d0\uc694 \u2014 \uce74\ud0c8\ub85c\uadf8 \uad00\ub828 \ud544\uc694\ud558\uc2e0 \uac70 \uc788\ub098\uc694?"
         ),
         (
-            "What time does the post office close?",
-            "I don't have post office hours, but you can check usps.com for that. I'm here to help with OfficeFlow products and services \u2014 anything I can assist with?"
+            "\uc6b0\uccb4\uad6d \uba87 \uc2dc\uae4c\uc9c0 \uc6b4\uc601\ud558\ub098\uc694?",
+            "\uc6b0\uccb4\uad6d \uc6b4\uc601\uc2dc\uac04\uc740 \uc81c\uac00 \ubaa8\ub974\uc9c0\ub9cc, \uc6b0\uccb4\uad6d \uc0ac\uc774\ud2b8\uc5d0\uc11c \ud655\uc778\ud558\uc2e4 \uc218 \uc788\uc744 \uac70\uc608\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\ub97c \ub3c4\uc640\ub4dc\ub824\uc694 \u2014 \ub3c4\uc6c0 \ud544\uc694\ud55c \uac8c \uc788\ub098\uc694?"
         ),
         (
-            "My name is {name}. Can you help me find a new apartment?",
-            "Hi {name}! I appreciate you reaching out, but apartment hunting is outside my area. I'm here for OfficeFlow product and service support. Need any office supplies?"
+            "\uc800\ub294 {name}\uc785\ub2c8\ub2e4. \uc0c8 \uc9d1 \uc54c\uc544\ubcf4\ub294 \uac83 \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! \ubb38\uc758 \uc8fc\uc154\uc11c \uac10\uc0ac\ud558\uc9c0\ub9cc, \uc9d1 \uc54c\uc544\ubcf4\ub294 \uc77c\uc740 \uc81c \ub2f4\ub2f9 \ubc94\uc704 \ubc16\uc774\uc5d0\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uc9c0\uc6d0\uc744 \ub2f4\ub2f9\ud569\ub2c8\ub2e4. \uc0ac\ubb34\uc6a9\ud488\uc740 \ud544\uc694\ud558\uc2e0\uac00\uc694?"
         ),
         (
-            "Is OfficeFlow hiring right now?",
-            "For job openings, I'd recommend checking our website or contacting corporate@officeflow.com. I handle product and service support. Anything supply-related I can help with?"
+            "OfficeFlow \uc9c0\uae08 \ucc44\uc6a9 \uc911\uc778\uac00\uc694?",
+            "\ucc44\uc6a9 \uacf5\uace0\ub294 \ud68c\uc0ac \uc6f9\uc0ac\uc774\ud2b8\ub97c \ud655\uc778\ud558\uc2dc\uac70\ub098 corporate@officeflow.com \uc73c\ub85c \ubb38\uc758 \uc8fc\uc138\uc694. \uc800\ub294 \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uc9c0\uc6d0\uc744 \ub2f4\ub2f9\ud574\uc694. \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc77c\uc774 \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you teach me how to use Excel?",
-            "Excel training is outside my expertise \u2014 there are great tutorials on YouTube and LinkedIn Learning. I'm here for OfficeFlow product questions though!"
+            "\uc5d1\uc140 \uc0ac\uc6a9\ubc95 \uc880 \uc54c\ub824\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc5d1\uc140 \uad50\uc721\uc740 \uc81c \uc804\ubb38 \ubd84\uc57c\uac00 \uc544\ub2c8\uc5d0\uc694 \u2014 \uc720\ud29c\ube0c\ub098 \uc778\ud504\ub7f0 \ub4f1\uc5d0 \uc88b\uc740 \uac15\uc758\uac00 \ub9ce\uc544\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488 \uad00\ub828 \ubb38\uc758\ub97c \ub2f4\ub2f9\ud569\ub2c8\ub2e4!"
         ),
         (
-            "I need to send flowers to my mom. Can you help?",
-            "That's sweet! But flower delivery is outside my scope. I'm here for OfficeFlow office supplies and services. Let me know if you need anything for the office!"
+            "\uc5b4\uba38\ub2c8\uaed8 \uaf43 \uc880 \ubcf4\ub0b4\uace0 \uc2f6\uc5b4\uc694. \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ub9c8\uc74c\uc774 \ub530\ub73b\ud558\ub124\uc694! \ud558\uc9c0\ub9cc \uaf43 \ubc30\ub2ec\uc740 \uc81c \ub2f4\ub2f9\uc774 \uc544\ub2c8\uc5d0\uc694. \uc800\ub294 OfficeFlow \uc0ac\ubb34\uc6a9\ud488\uacfc \uc11c\ube44\uc2a4 \ub2f4\ub2f9\uc774\uc5d0\uc694. \uc0ac\ubb34\uc2e4\uc5d0 \ud544\uc694\ud55c \uac8c \uc788\uc73c\uba74 \uc54c\ub824\uc8fc\uc138\uc694!"
         ),
         (
-            "Do you sell electronics or computer accessories?",
-            "We don't carry electronics or computer accessories. Our catalog focuses on office supplies, paper products, writing instruments, and organizational tools. Can I help you find something in those categories?"
+            "\uc804\uc790\uae30\uae30\ub098 \ucef4\ud4e8\ud130 \uc561\uc138\uc11c\ub9ac\ub3c4 \ud310\ub9e4\ud558\uc2dc\ub098\uc694?",
+            "\uc804\uc790\uae30\uae30\ub098 \ucef4\ud4e8\ud130 \uc561\uc138\uc11c\ub9ac\ub294 \ucde8\uae09\ud558\uc9c0 \uc54a\uc544\uc694. \uc800\ud76c \uce74\ud0c8\ub85c\uadf8\ub294 \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ud544\uae30\uad6c, \uc815\ub9ac\uc6a9\ud488 \uc704\uc8fc\uc608\uc694. \uadf8 \uce74\ud14c\uace0\ub9ac\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uac8c \uc788\uc744\uae4c\uc694?"
         ),
         (
-            "Can you check the flight status for my upcoming trip?",
-            "Flight tracking is outside what I can do \u2014 I'd recommend checking your airline's app or website. I'm here for OfficeFlow product and service questions!"
+            "\uc608\uc57d\ub41c \ud56d\uacf5\ud3b8 \uc0c1\ud0dc \uc880 \ud655\uc778\ud574\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ud56d\uacf5\ud3b8 \uc870\ud68c\ub294 \uc81c\uac00 \ud560 \uc218 \uc788\ub294 \uc77c\uc774 \uc544\ub2c8\uc5d0\uc694 \u2014 \ud56d\uacf5\uc0ac \uc571\uc774\ub098 \uc6f9\uc0ac\uc774\ud2b8\uc5d0\uc11c \ud655\uc778\ud574 \ubcf4\uc138\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \ubb38\uc758\ub97c \ub2f4\ub2f9\ud569\ub2c8\ub2e4!"
         ),
         (
-            "What's the meaning of life?",
-            "That's a deep one! I'll leave that to the philosophers. I'm here to help with OfficeFlow products and services. Anything supply-related on your mind?"
+            "\uc778\uc0dd\uc758 \uc758\ubbf8\uac00 \ubb58\uae4c\uc694?",
+            "\uc2ec\uc624\ud55c \uc9c8\ubb38\uc774\ub124\uc694! \uadf8\uac74 \ucca0\ud559\uc790\uc5d0\uac8c \ub9e1\uae38\uac8c\uc694. \uc800\ub294 OfficeFlow \uc0c1\ud488\uacfc \uc11c\ube44\uc2a4\ub97c \ub3c4\uc640\ub4dc\ub824\uc694. \uc0ac\ubb34\uc6a9\ud488 \uad00\ub828\ud574\uc11c \uad81\uae08\ud55c \uac8c \uc788\uc73c\uc2e0\uac00\uc694?"
         ),
         (
-            "I need to dispute a charge on my credit card. Can you help?",
-            "Credit card disputes go through your card issuer, not through us. If the charge is from OfficeFlow and you believe it's incorrect, contact accounts@officeflow.com."
+            "\uc2e0\uc6a9\uce74\ub4dc \uccad\uad6c \uac74\uc5d0 \ub300\ud574 \uc774\uc758 \uc2e0\uccad\uc744 \ud574\uc57c \ud574\uc694. \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\uc2e0\uc6a9\uce74\ub4dc \uc774\uc758 \uc2e0\uccad\uc740 \uc800\ud76c\uac00 \uc544\ub2cc \uce74\ub4dc\uc0ac\ub97c \ud1b5\ud574 \uc9c4\ud589\ud558\uc154\uc57c \ud574\uc694. OfficeFlow \uccad\uad6c \uac74 \uc911\uc5d0 \uc798\ubabb\ub41c \uac8c \uc788\ub2e4\uace0 \uc0dd\uac01\ub418\uc2dc\uba74 accounts@officeflow.com \uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "Can you help with team building activities?",
-            "Team building is outside my area, but sounds fun! I'm here for OfficeFlow product and service support. Need supplies for a team event?"
+            "\ud300\ube4c\ub529 \ud65c\ub3d9 \uc880 \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ud300\ube4c\ub529\uc740 \uc81c \ub2f4\ub2f9 \ubc94\uc704 \ubc16\uc774\uc9c0\ub9cc \uc7ac\ubbf8\uc788\uc5b4 \ubcf4\uc5ec\uc694! \uc800\ub294 OfficeFlow \uc0c1\ud488 \ubc0f \uc11c\ube44\uc2a4 \uc9c0\uc6d0\uc744 \ub2f4\ub2f9\ud574\uc694. \ud300 \ud589\uc0ac\uc6a9 \ube44\ud488\uc774 \ud544\uc694\ud558\uc2dc\uba74 \ub9d0\uc500\ud574 \uc8fc\uc138\uc694?"
         ),
         (
-            "Do you sell ergonomic chairs or standing desks?",
-            "We don't currently carry furniture like chairs or desks. We focus on office supplies, paper products, and desk accessories. Anything from our catalog I can help with?"
+            "\uc778\uccb4\uacf5\ud559 \uc758\uc790\ub098 \uc2a4\ud0e0\ub529 \ub370\uc2a4\ud06c\ub3c4 \ud310\ub9e4\ud558\ub098\uc694?",
+            "\uc758\uc790\ub098 \ucc45\uc0c1 \uac19\uc740 \uac00\uad6c\ub294 \ud604\uc7ac \ucde8\uae09\ud558\uc9c0 \uc54a\uc544\uc694. \uc800\ud76c\ub294 \uc0ac\ubb34\uc6a9\ud488, \uc885\uc774\ub958, \ucc45\uc0c1 \uc561\uc138\uc11c\ub9ac \uc704\uc8fc\uc608\uc694. \uce74\ud0c8\ub85c\uadf8 \ub0b4\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uac8c \uc788\uc744\uae4c\uc694?"
         ),
     ]
     pairs = []
@@ -632,167 +659,167 @@ def _out_of_scope_questions():
 
 
 def _both_questions():
-    """Return list of (question, response) tuples for both (inventory+policy) category."""
+    """both \uce74\ud14c\uace0\ub9ac (inventory + policy \ub3d9\uc2dc \ud3ec\ud568) (\uc9c8\ubb38, \uc751\ub2f5) \ud29c\ud50c \ub9ac\uc2a4\ud2b8 \ubc18\ud658."""
     templates = [
         (
-            "Do you have {product} in stock, and what's your return policy if they don't work out?",
-            "{product} is currently in stock! As for returns, items can be returned within 30 days with an RMA from returns@officeflow.com. Defective items can be returned anytime."
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \ub9cc\uc57d \uc548 \ub9de\uc73c\uba74 \ubc18\ud488 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \ud604\uc7ac \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \ubc18\ud488\uc740 returns@officeflow.com \uc5d0\uc11c RMA\ub97c \ubc1c\uae09\ubc1b\uc73c\uc2dc\uba74 30\uc77c \uc774\ub0b4 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ubd88\ub7c9\ud488\uc740 \uc5b8\uc81c\ub4e0 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "I need {product} \u2014 are they available? Also, how much is shipping?",
-            "{product} is in stock! Shipping is $8.95 standard (3-5 days), free on orders over $100. Expedited and overnight options are also available."
+            "{product}\uac00 \ud544\uc694\ud55c\ub370 \uc7ac\uace0 \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \ubc30\uc1a1\ube44\ub294 \uc5bc\ub9c8\uc778\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0\uac00 \uc788\uc2b5\ub2c8\ub2e4! \uc77c\ubc18 \ubc30\uc1a1\uc740 8,950\uc6d0 (3~5\uc77c), 10\ub9cc\uc6d0 \uc774\uc0c1 \uc8fc\ubb38 \uc2dc \ubb34\ub8cc\uc785\ub2c8\ub2e4. \ube60\ub978 \ubc30\uc1a1\uacfc \uc775\uc77c \ubc30\uc1a1 \uc635\uc158\ub3c4 \uc788\uc5b4\uc694."
         ),
         (
-            "Can you check if you have {product} and tell me how to place an order?",
-            "{product} is available! To order, use our web portal at www.officeflow.com or email sales@officeflow.com."
+            "{product} \uc7ac\uace0 \ud655\uc778\ud558\uace0 \uc8fc\ubb38 \ubc29\ubc95\ub3c4 \uc54c\ub824\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uc8fc\ubb38\uc740 \uc6f9 \ud3ec\ud138(www.officeflow.com)\uc774\ub098 sales@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc2dc\uba74 \ub429\ub2c8\ub2e4."
         ),
         (
-            "I'm looking at {product} and {product2}. Are both available, and do you ship to Canada?",
-            "Both {product} and {product2} are in stock! And yes, we ship to all Canadian provinces. Expect 1-2 extra days for customs, and duties/taxes may apply."
+            "{product}\uc640 {product2}\ub97c \ubcf4\uace0 \uc788\ub294\ub370\uc694. \ub458 \ub2e4 \uc7ac\uace0 \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \ud574\uc678 \ubc30\uc1a1\ub3c4 \ub418\ub098\uc694?",
+            "{product}\uc640 {product2} \ubaa8\ub450 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uadf8\ub9ac\uace0 \ub124, \uac00\uae4c\uc6b4 \uc544\uc2dc\uc544 \uad6d\uac00\ub294 \ubaa8\ub450 \ubc30\uc1a1 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ud1b5\uad00\uc5d0 1~2\uc77c \ucd94\uac00 \uc18c\uc694\ub418\uace0, \uad00\uc138/\uc138\uae08\uc774 \ubd80\uacfc\ub420 \uc218 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "My name is {name} from {company}. I need {product} \u2014 is it in stock? And can I return it if my team doesn't like it?",
-            "Hi {name}! {product} is in stock. If your team isn't happy, you can return it within 30 days \u2014 just contact returns@officeflow.com for an RMA."
+            "\uc800\ub294 {company}\uc758 {name}\uc785\ub2c8\ub2e4. {product}\uac00 \ud544\uc694\ud55c\ub370 \uc7ac\uace0 \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \ud300\uc6d0\ub4e4\uc774 \ub9c8\uc74c\uc5d0 \uc548 \ub4e4\uc5b4 \ud558\uba74 \ubc18\ud488 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4. \ud300\uc6d0\ub4e4\uc774 \ub9c8\uc74c\uc5d0 \uc548 \ub4e4\uc5b4 \ud558\uc2dc\uba74 30\uc77c \uc774\ub0b4 \ubc18\ud488 \uac00\ub2a5\ud574\uc694 \u2014 returns@officeflow.com \uc73c\ub85c RMA \uc2e0\uccad\ub9cc \ud558\uc2dc\uba74 \ub429\ub2c8\ub2e4."
         ),
         (
-            "Do you carry {product}? And what's the quickest shipping option?",
-            "{product} is in stock! Our fastest option is Overnight Shipping at $39.95 \u2014 order by 12:00 PM EST for next-business-day delivery."
+            "{product} \ucde8\uae09\ud558\uc2dc\ub098\uc694? \uadf8\ub9ac\uace0 \uac00\uc7a5 \ube60\ub978 \ubc30\uc1a1 \uc635\uc158\uc774 \ubb54\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uac00\uc7a5 \ube60\ub978 \uc635\uc158\uc740 \uc775\uc77c \ubc30\uc1a1 (39,950\uc6d0)\uc785\ub2c8\ub2e4 \u2014 KST \uc815\uc624\uae4c\uc9c0 \uc8fc\ubb38\ud558\uc2dc\uba74 \ub2e4\uc74c \uc601\uc5c5\uc77c\uc5d0 \ubc1b\uc73c\uc2e4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "I need to know if {product} is available and whether I can get free shipping.",
-            "{product} is available! Standard shipping is free on orders of $100 or more."
+            "{product}\uac00 \uc7ac\uace0 \uc788\ub294\uc9c0, \uadf8\ub9ac\uace0 \ubb34\ub8cc \ubc30\uc1a1 \ubc1b\uc744 \uc218 \uc788\ub294\uc9c0 \uc54c\ub824\uc8fc\uc138\uc694.",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! 10\ub9cc\uc6d0 \uc774\uc0c1 \uc8fc\ubb38 \uc2dc \uc77c\ubc18 \ubc30\uc1a1\uc774 \ubb34\ub8cc\ub85c \uc81c\uacf5\ub429\ub2c8\ub2e4."
         ),
         (
-            "Are {product} in stock? Also, I got a damaged item in my last order \u2014 what do I do?",
-            "{product} is in stock. For the damaged item, photograph it and email fulfillment@officeflow.com within 48 hours. They'll arrange a replacement or refund immediately."
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694? \uc9c0\ub09c\ubc88 \uc8fc\ubb38\uc5d0\uc11c \ud30c\uc190\ud488\uc744 \ubc1b\uc558\ub294\ub370 \uc5b4\ub5bb\uac8c \ud574\uc57c \ud558\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4. \ud30c\uc190\ud488 \uac74\uc740 \uc0ac\uc9c4\uc744 \ucc0d\uc5b4\uc11c 48\uc2dc\uac04 \uc774\ub0b4\uc5d0 fulfillment@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc138\uc694. \uc989\uc2dc \uad50\ud658 \ub610\ub294 \ud658\ubd88\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "I want to order {product} and also need to process a return on order {order}.",
-            "{product} is in stock and ready to order through the portal. For the return on {order}, contact returns@officeflow.com with your order number and reason \u2014 they'll issue an RMA within 4 business hours."
+            "{product}\ub97c \uc8fc\ubb38\ud558\uace0 \uc2f6\uace0, {order} \uc8fc\ubb38 \uac74 \ubc18\ud488\ub3c4 \ud574\uc57c \ud569\ub2c8\ub2e4.",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uace0 \ud3ec\ud138\uc5d0\uc11c \ubc14\ub85c \uc8fc\ubb38 \uac00\ub2a5\ud569\ub2c8\ub2e4. {order} \ubc18\ud488\uc740 returns@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638\uc640 \uc0ac\uc720 \ubcf4\ub0b4\uc8fc\uc2dc\uba74 4\uc601\uc5c5\uc2dc\uac04 \uc774\ub0b4\uc5d0 RMA\uac00 \ubc1c\uae09\ub429\ub2c8\ub2e4."
         ),
         (
-            "Do you have {product}? And where's your nearest warehouse for pickup?",
-            "{product} is in stock! Our distribution centers are in Portland OR, Schaumburg IL (Chicago), Norcross GA (Atlanta), and Mississauga ON (Toronto). Select Will Call Pickup at checkout."
+            "{product} \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \uac00\uae4c\uc6b4 \ud53d\uc5c5 \uac00\ub2a5\ud55c \ubb3c\ub958\uc13c\ud130\ub294 \uc5b4\ub514\uc778\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ubb3c\ub958\uc13c\ud130\ub294 \uc11c\uc6b8 \ubcf8\uc0ac, \ubd80\uc0b0, \uad11\uc8fc, \uc778\ucc9c 4\uacf3\uc5d0 \uc788\uc5b4\uc694. \uacb0\uc81c \uc2dc \ubc29\ubb38 \uc218\ub839\uc744 \uc120\ud0dd\ud558\uc2dc\uba74 \ub429\ub2c8\ub2e4."
         ),
         (
-            "Is {product} available? I also want to know about your bulk pricing.",
-            "{product} is in stock! For bulk pricing, contact our sales team at sales@officeflow.com or 1-800-OFFICE-1 ext. 2 \u2014 they can get you a quote."
+            "{product} \uad6c\ub9e4 \uac00\ub2a5\ud55c\uac00\uc694? \ub300\ub7c9 \uc8fc\ubb38 \uc2dc \uac00\uaca9\ub3c4 \uc54c\uace0 \uc2f6\uc5b4\uc694.",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ub300\ub7c9 \uc8fc\ubb38 \uac00\uaca9\uc740 sales@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 2\ubc88\uc73c\ub85c \uc601\uc5c5\ud300\uc5d0 \ubb38\uc758 \uc8fc\uc138\uc694 \u2014 \uacac\uc801\uc744 \uc548\ub0b4\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "I need {product} urgently \u2014 do you have it? What's the fastest I can get it?",
-            "{product} is in stock! With Overnight Shipping ($39.95), order by 12:00 PM EST and you'll have it the next business day."
+            "{product}\uac00 \uae09\ud558\uac8c \ud544\uc694\ud55c\ub370 \uc7ac\uace0 \uc788\ub098\uc694? \uac00\uc7a5 \ube68\ub9ac \ubc1b\uc744 \uc218 \uc788\ub294 \ubc29\ubc95\uc774 \ubb50\uc608\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uc775\uc77c \ubc30\uc1a1(39,950\uc6d0)\uc744 \uc774\uc6a9\ud558\uc2dc\uace0 KST \uc815\uc624\uae4c\uc9c0 \uc8fc\ubb38\ud558\uc2dc\uba74 \ub2e4\uc74c \uc601\uc5c5\uc77c\uc5d0 \ubc1b\uc73c\uc2e4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "Check availability on {product} please, and let me know your business hours.",
-            "{product} is available! Our phone lines are open Monday-Friday 7:00 AM - 7:00 PM EST, Saturday 9:00 AM - 2:00 PM EST. Closed Sundays."
+            "{product} \uc7ac\uace0 \ud655\uc778 \ubd80\ud0c1\ub4dc\ub9ac\uace0, \uc601\uc5c5\uc2dc\uac04\ub3c4 \uc54c\ub824\uc8fc\uc138\uc694.",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uc804\ud654 \uc0c1\ub2f4\uc740 \ud3c9\uc77c \uc624\uc804 7\uc2dc ~ \uc624\ud6c4 7\uc2dc (KST), \ud1a0\uc694\uc77c \uc624\uc804 9\uc2dc ~ \uc624\ud6c4 2\uc2dc (KST)\uc5d0 \uac00\ub2a5\ud569\ub2c8\ub2e4. \uc77c\uc694\uc77c\uc740 \ud734\ubb34\uc785\ub2c8\ub2e4."
         ),
         (
-            "I'm with {company}. Need to check stock on {product} and understand your shipping costs.",
-            "Hi! {product} is in stock. Standard shipping is $8.95 (free over $100), Expedited is $15.95, Express is $24.95, and Overnight is $39.95."
+            "\uc800\ub294 {company}\uc5d0\uc11c \uc77c\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4. {product} \uc7ac\uace0 \ud655\uc778\ud558\uace0, \ubc30\uc1a1\ube44\ub3c4 \uc54c\ub824\uc8fc\uc138\uc694.",
+            "\uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4. \uc77c\ubc18 \ubc30\uc1a1\uc740 8,950\uc6d0 (10\ub9cc\uc6d0 \uc774\uc0c1 \ubb34\ub8cc), \ube60\ub978 \ubc30\uc1a1 15,950\uc6d0, \ud2b9\uae09 24,950\uc6d0, \uc775\uc77c \ubc30\uc1a1 39,950\uc6d0\uc785\ub2c8\ub2e4."
         ),
         (
-            "Do you have {product}? And if I order today, when would it arrive?",
-            "{product} is in stock! If you order before 2:00 PM EST today, it ships same day. Standard delivery is 3-5 business days."
+            "{product} \uc788\ub098\uc694? \uc624\ub298 \uc8fc\ubb38\ud558\uba74 \uc5b8\uc81c \ub3c4\ucc29\ud558\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uc624\ub298 KST \uc624\ud6c4 2\uc2dc \uc774\uc804\uc5d0 \uc8fc\ubb38\ud558\uc2dc\uba74 \ub2f9\uc77c \ucd9c\uace0\ub429\ub2c8\ub2e4. \uc77c\ubc18 \ubc30\uc1a1\uc740 3~5\uc601\uc5c5\uc77c \uc18c\uc694\ub429\ub2c8\ub2e4."
         ),
         (
-            "I need {product} and {product2}. Are they available? Also, what's the return process?",
-            "Both {product} and {product2} are in stock! For returns, contact returns@officeflow.com with your order number. They'll issue an RMA within 4 business hours. Items must be returned within 30 days."
+            "{product}\uc640 {product2}\uac00 \ud544\uc694\ud569\ub2c8\ub2e4. \uc7ac\uace0 \uc788\ub098\uc694? \ubc18\ud488 \uc808\ucc28\ub3c4 \uc54c\ub824\uc8fc\uc138\uc694.",
+            "{product}\uc640 {product2} \ubaa8\ub450 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ubc18\ud488\uc740 returns@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638\uc640 \ud568\uaed8 \uc5f0\ub77d \uc8fc\uc2dc\uba74 \ub429\ub2c8\ub2e4. 4\uc601\uc5c5\uc2dc\uac04 \uc774\ub0b4\uc5d0 RMA\uac00 \ubc1c\uae09\ub418\uba70, 30\uc77c \uc774\ub0b4\uc5d0 \ubc18\ud488\ud558\uc154\uc57c \ud569\ub2c8\ub2e4."
         ),
         (
-            "Can I get {product} with expedited shipping? Is it in stock?",
-            "{product} is in stock! Expedited shipping is $15.95 and takes 2-3 business days. Order before 2:00 PM EST for same-day processing."
+            "{product}\ub97c \ube60\ub978 \ubc30\uc1a1\uc73c\ub85c \ubc1b\uc744 \uc218 \uc788\ub098\uc694? \uc7ac\uace0 \uc788\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ube60\ub978 \ubc30\uc1a1\uc740 15,950\uc6d0\uc774\uace0 2~3\uc601\uc5c5\uc77c \uc18c\uc694\ub429\ub2c8\ub2e4. KST \uc624\ud6c4 2\uc2dc \uc774\uc804 \uc8fc\ubb38\uc740 \ub2f9\uc77c \ucd9c\uace0 \ucc98\ub9ac\ub429\ub2c8\ub2e4."
         ),
         (
-            "Hi, I'm {name}. I need {product} shipped to {company}. What are my shipping options?",
-            "Hi {name}! {product} is in stock. For {company}, you can choose Standard ($8.95, 3-5 days), Expedited ($15.95, 2-3 days), Express ($24.95, 1-2 days), or Overnight ($39.95, next day)."
+            "\uc548\ub155\ud558\uc138\uc694, \uc800\ub294 {name}\uc785\ub2c8\ub2e4. {company}\ub85c {product} \ubc30\uc1a1\uc744 \ubc1b\uace0 \uc2f6\uc5b4\uc694. \ubc30\uc1a1 \uc635\uc158\uc774 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4. {company}\ub85c\ub294 \uc77c\ubc18 \ubc30\uc1a1(8,950\uc6d0, 3~5\uc77c), \ube60\ub978 \ubc30\uc1a1(15,950\uc6d0, 2~3\uc77c), \ud2b9\uae09(24,950\uc6d0, 1~2\uc77c), \uc775\uc77c \ubc30\uc1a1(39,950\uc6d0, \uc775\uc77c) \uc911 \uc120\ud0dd \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "Are {product} available? And is there a minimum order for free shipping?",
-            "{product} is available! Free standard shipping kicks in at $100 or more. Free expedited shipping at $250+."
+            "{product} \uad6c\ub9e4 \uac00\ub2a5\ud55c\uac00\uc694? \ubb34\ub8cc \ubc30\uc1a1 \ubc1b\uc73c\ub824\uba74 \ucd5c\uc18c \uc8fc\ubb38 \uae08\uc561\uc774 \uc5bc\ub9c8\uc778\uac00\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uc77c\ubc18 \ubc30\uc1a1 \ubb34\ub8cc\ub294 10\ub9cc\uc6d0 \uc774\uc0c1\ubd80\ud130, \ube60\ub978 \ubc30\uc1a1 \ubb34\ub8cc\ub294 25\ub9cc\uc6d0 \uc774\uc0c1\ubd80\ud130 \uc801\uc6a9\ub429\ub2c8\ub2e4."
         ),
         (
-            "I'm interested in {product}. Do you have them? Also, do you offer Will Call pickup?",
-            "{product} is in stock! Yes, Will Call Pickup is available at all four of our distribution centers \u2014 Portland, Chicago, Atlanta, and Toronto. Select it at checkout."
+            "{product}\uc5d0 \uad00\uc2ec\uc774 \uc788\ub294\ub370 \uc7ac\uace0 \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \ubc29\ubb38 \uc218\ub839\ub3c4 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ub124, \ubc29\ubb38 \uc218\ub839\uc740 4\uacf3\uc758 \ubb3c\ub958\uc13c\ud130 \ubaa8\ub450\uc5d0\uc11c \uac00\ub2a5\ud569\ub2c8\ub2e4 \u2014 \uc11c\uc6b8, \ubd80\uc0b0, \uad11\uc8fc, \uc778\ucc9c \ubaa8\ub450 \uac00\ub2a5\ud574\uc694. \uacb0\uc81c \uc2dc \uc120\ud0dd\ud558\uc2dc\uba74 \ub429\ub2c8\ub2e4."
         ),
         (
-            "Can you check {product} availability and tell me about business account benefits?",
-            "{product} is in stock! Business accounts may offer custom shipping rates, dedicated delivery routes, and customized return policies. Contact accounts@officeflow.com to learn more."
+            "{product} \uc7ac\uace0 \ud655\uc778\ud558\uace0 \uae30\uc5c5 \uacc4\uc815 \ud61c\ud0dd\ub3c4 \uc54c\ub824\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uae30\uc5c5 \uacc4\uc815\uc740 \ub9de\ucda4 \ubc30\uc1a1 \uc694\uae08, \uc804\uc6a9 \ubc30\uc1a1 \ub77c\uc778, \ub9de\ucda4\ud615 \ubc18\ud488 \uc815\ucc45 \ub4f1\uc758 \ud61c\ud0dd\uc744 \ubc1b\uc73c\uc2e4 \uc218 \uc788\uc5b4\uc694. \uc790\uc138\ud55c \uc0ac\ud56d\uc740 accounts@officeflow.com \uc73c\ub85c \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "Do you have {product} in stock? I also want to exchange something from order {order}.",
-            "{product} is in stock! For the exchange on {order}, contact returns@officeflow.com \u2014 you'll need an RMA. Price differences may apply."
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694? {order} \uc8fc\ubb38 \uac74 \uad50\ud658\ub3c4 \ud558\uace0 \uc2f6\uc5b4\uc694.",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! {order} \uad50\ud658\uc740 returns@officeflow.com \uc73c\ub85c \uc5f0\ub77d\ud558\uc2dc\uba74 \ub429\ub2c8\ub2e4 \u2014 RMA\uac00 \ud544\uc694\ud574\uc694. \ucc28\uc561\uc774 \ubc1c\uc0dd\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "I need {product} and want to know if there's a cutoff for same-day shipping.",
-            "{product} is available! Orders placed before 2:00 PM EST ship same business day."
+            "{product}\uac00 \ud544\uc694\ud55c\ub370, \ub2f9\uc77c \ubc30\uc1a1 \ub9c8\uac10 \uc2dc\uac04\uc774 \uc5b8\uc81c\uc778\uac00\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! KST \uc624\ud6c4 2\uc2dc \uc774\uc804\uc5d0 \uc8fc\ubb38\ud558\uc2dc\uba74 \ub2f9\uc77c \ucd9c\uace0\ub429\ub2c8\ub2e4."
         ),
         (
-            "Are {product} available? Also, what holidays are you closed?",
-            "{product} is in stock! We're closed on New Year's Day, Memorial Day, July 4th, Labor Day, Thanksgiving, and Christmas. Limited hours on the eves."
+            "{product} \uad6c\ub9e4 \uac00\ub2a5\ud55c\uac00\uc694? \uadf8\ub9ac\uace0 \ud734\ubb34\uc77c\uc774 \uc5b8\uc81c\uc778\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uc124\ub0a0, \ucd94\uc11d, \uc5b4\ub9b0\uc774\ub0a0, \uad11\ubcf5\uc808, \uac1c\ucc9c\uc808, \ud55c\uae00\ub0a0, \uc131\ud0c4\uc808\uc5d0 \ud734\ubb34\uc774\uace0, \uba85\uc808 \uc804\ub0a0\uacfc \uc131\ud0c4\uc808 \uc774\ube0c\uc5d0\ub294 \ub2e8\ucd95 \uc601\uc5c5\uc785\ub2c8\ub2e4."
         ),
         (
-            "Quick questions \u2014 is {product} in stock and can I track my order online?",
-            "{product} is in stock! Yes, you can track orders at www.officeflow.com/track using your tracking number, which is emailed when the order ships."
+            "\uac04\ub2e8\ud788 \uc5ec\ucb64\ubcfc\uac8c\uc694 \u2014 {product} \uc7ac\uace0 \uc788\ub098\uc694? \uc628\ub77c\uc778\uc5d0\uc11c \uc8fc\ubb38 \uc870\ud68c\ub3c4 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ub124, www.officeflow.com/track \uc5d0\uc11c \uc1a1\uc7a5\ubc88\ud638\ub85c \uc870\ud68c \uac00\ub2a5\ud558\uace0, \uc1a1\uc7a5\ubc88\ud638\ub294 \ucd9c\uace0 \uc2dc \uc774\uba54\uc77c\ub85c \ubc1c\uc1a1\ub429\ub2c8\ub2e4."
         ),
         (
-            "Do you carry {product}? And if something's wrong with my order, who do I call?",
-            "{product} is available! For order issues, contact fulfillment@officeflow.com or 1-800-OFFICE-1 ext. 5. For returns, it's returns@officeflow.com or ext. 3."
+            "{product} \ucde8\uae09\ud558\uc2dc\ub098\uc694? \uc8fc\ubb38\uc5d0 \ubb38\uc81c\uac00 \uc0dd\uae30\uba74 \uc5b4\ub514\ub85c \uc5f0\ub77d\ud558\ub098\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uc8fc\ubb38 \uad00\ub828 \ubb38\uc81c\ub294 fulfillment@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 5\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694. \ubc18\ud488\uc740 returns@officeflow.com \ub610\ub294 \ub0b4\uc120 3\ubc88\uc785\ub2c8\ub2e4."
         ),
         (
-            "I want {product}. Is it available? Can I change the shipping address after I order?",
-            "{product} is in stock! You can change the shipping address for free within 2 hours of placing the order. After that, or once shipped, a $10-15 rerouting fee may apply."
+            "{product}\uac00 \ud544\uc694\ud574\uc694. \uc7ac\uace0 \uc788\ub098\uc694? \uc8fc\ubb38 \ud6c4\uc5d0 \ubc30\uc1a1\uc9c0 \ubcc0\uacbd \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \uc8fc\ubb38 \ud6c4 2\uc2dc\uac04 \uc774\ub0b4\uc5d0\ub294 \ubb34\ub8cc\ub85c \ubc30\uc1a1\uc9c0 \ubcc0\uacbd \uac00\ub2a5\ud569\ub2c8\ub2e4. \uadf8 \uc774\ud6c4\ub098 \ucd9c\uace0 \ud6c4\uc5d0\ub294 10,000~15,000\uc6d0\uc758 \uc7ac\ubc30\uc1a1 \uc218\uc218\ub8cc\uac00 \ubd80\uacfc\ub429\ub2c8\ub2e4."
         ),
         (
-            "This is {name} at {company}. Are {product} in stock? We might need to set up a recurring order.",
-            "Hi {name}! {product} is in stock. For recurring orders at {company}, contact sales@officeflow.com \u2014 they can set up a schedule that works for your team."
+            "\uc800\ub294 {company}\uc758 {name}\uc785\ub2c8\ub2e4. {product} \uc7ac\uace0 \uc788\ub098\uc694? \uc815\uae30 \uc8fc\ubb38 \uc124\uc815\ub3c4 \uace0\ub824 \uc911\uc774\uc5d0\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4. {company}\uc758 \uc815\uae30 \uc8fc\ubb38\uc740 sales@officeflow.com \uc73c\ub85c \uc5f0\ub77d \uc8fc\uc2dc\uba74 \ud300\uc5d0 \ub9de\ub294 \uc77c\uc815\uc73c\ub85c \uc124\uc815\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "Check stock on {product}. Also, what if the product arrives damaged?",
-            "{product} is in stock! If it arrives damaged, photograph it and email fulfillment@officeflow.com within 48 hours. They'll send a replacement immediately."
+            "{product} \uc7ac\uace0 \ud655\uc778 \ubd80\ud0c1\ub4dc\ub824\uc694. \uadf8\ub9ac\uace0 \uc0c1\ud488\uc774 \ud30c\uc190\ub418\uc5b4 \uc624\uba74 \uc5b4\ub5bb\uac8c \ud558\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ud30c\uc190\ub41c \uc0c1\ud0dc\ub85c \ub3c4\ucc29\ud558\uba74 \uc0ac\uc9c4 \ucc0d\uc5b4\uc11c 48\uc2dc\uac04 \uc774\ub0b4\uc5d0 fulfillment@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc138\uc694. \uc989\uc2dc \ub300\uccb4\ud488\uc744 \ubc1c\uc1a1\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "Hi, do you have {product}? Also what's your phone number for customer service?",
-            "{product} is available! Our customer service number is 1-800-OFFICE-1 (ext. 1), available Monday-Friday 7 AM - 7 PM EST and Saturday 9 AM - 2 PM EST."
+            "\uc548\ub155\ud558\uc138\uc694, {product} \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \uace0\uac1d \uc11c\ube44\uc2a4 \uc804\ud654\ubc88\ud638\ub3c4 \uc54c\ub824\uc8fc\uc138\uc694.",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uace0\uac1d \uc11c\ube44\uc2a4 \uc804\ud654\ubc88\ud638\ub294 1588-0000 (\ub0b4\uc120 1\ubc88)\uc774\uace0, \ud3c9\uc77c \uc624\uc804 7\uc2dc ~ \uc624\ud6c4 7\uc2dc, \ud1a0\uc694\uc77c \uc624\uc804 9\uc2dc ~ \uc624\ud6c4 2\uc2dc (KST)\uc5d0 \uc751\ub300\ud569\ub2c8\ub2e4."
         ),
         (
-            "I'm looking at ordering {product}. Available? And do you have Spanish language support?",
-            "{product} is in stock! Yes, we offer English and Spanish support for US customers. Just request it when you call."
+            "{product} \uc8fc\ubb38\uc744 \uc0dd\uac01 \uc911\uc778\ub370, \uc7ac\uace0 \uc788\ub098\uc694? \uc678\uad6d\uc5b4 \uc0c1\ub2f4\ub3c4 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ub124, \ud55c\uad6d\uc5b4\uc640 \uc601\uc5b4 \uc0c1\ub2f4\uc744 \uc81c\uacf5\ud558\uace0 \uc788\uc5b4\uc694. \uc804\ud654 \uc8fc\uc2e4 \ub54c \uc694\uccad\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "Can you confirm {product} is in stock? I also need to know about your return shipping costs.",
-            "{product} is confirmed in stock. Return shipping is the customer's responsibility unless the item is defective or we shipped the wrong thing \u2014 in those cases, it's free."
+            "{product} \uc7ac\uace0 \uc788\ub294\uc9c0 \ud655\uc778 \ubd80\ud0c1\ub4dc\ub9ac\uace0, \ubc18\ud488 \ubc30\uc1a1\ube44\ub3c4 \uc54c\uace0 \uc2f6\uc5b4\uc694.",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc74c\uc744 \ud655\uc778\ud574 \ub4dc\ub9bd\ub2c8\ub2e4. \ubc18\ud488 \ubc30\uc1a1\ube44\ub294 \ubd88\ub7c9\ud488\uc774\uac70\ub098 \uc800\ud76c \uce21 \ubc30\uc1a1 \uc624\ub958\uac00 \uc544\ub2cc \ud55c \uace0\uac1d \ubd80\ub2f4\uc785\ub2c8\ub2e4 \u2014 \uadf8 \uacbd\uc6b0\uc5d0\ub294 \ubb34\ub8cc\uc785\ub2c8\ub2e4."
         ),
         (
-            "Are {product} available? And how long is the RMA valid once issued?",
-            "{product} is available! Once issued, an RMA is valid for 14 days. Contact returns@officeflow.com to get one."
+            "{product} \uad6c\ub9e4 \uac00\ub2a5\ud55c\uac00\uc694? RMA\ub294 \ubc1c\uae09\ub41c \ud6c4 \uc5bc\ub9c8 \ub3d9\uc548 \uc720\ud6a8\ud55c\uac00\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! RMA \ubc1c\uae09 \ud6c4 14\uc77c\uac04 \uc720\ud6a8\ud569\ub2c8\ub2e4. RMA\ub294 returns@officeflow.com \uc73c\ub85c \uc694\uccad\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I need {product} for {company}. Also, do you ship to APO/FPO addresses?",
-            "{product} is in stock! We do ship to APO/FPO addresses, but only via standard shipping."
+            "{company}\uc6a9\uc73c\ub85c {product}\uac00 \ud544\uc694\ud574\uc694. \ub3c4\uc11c \uc0b0\uac04 \uc9c0\uc5ed\ub3c4 \ubc30\uc1a1 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ub3c4\uc11c \uc0b0\uac04 \uc9c0\uc5ed\ub3c4 \ubc30\uc1a1 \uac00\ub2a5\ud558\uc9c0\ub9cc, \uc77c\ubc18 \ubc30\uc1a1\uc73c\ub85c\ub9cc \ucc98\ub9ac\ub429\ub2c8\ub2e4."
         ),
         (
-            "Is {product} in stock? And what are your distribution center hours?",
-            "{product} is in stock! Our distribution centers are open Monday-Friday 7:00 AM - 6:00 PM local time. Closed weekends."
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694? \ubb3c\ub958\uc13c\ud130 \uc6b4\uc601 \uc2dc\uac04\uc740 \uc5b4\ub5bb\uac8c \ub418\ub098\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ubb3c\ub958\uc13c\ud130\ub294 \ud3c9\uc77c \uc624\uc804 7\uc2dc ~ \uc624\ud6c4 6\uc2dc(\ud604\uc9c0 \uc2dc\uac04)\uc5d0 \uc6b4\uc601\ud558\uace0 \uc8fc\ub9d0\uc740 \ud734\ubb34\uc785\ub2c8\ub2e4."
         ),
         (
-            "Do you have {product}? Plus, I heard there's an emergency contact for after-hours \u2014 what is it?",
-            "{product} is available! For urgent after-hours issues, email urgent@officeflow.com \u2014 they respond within 2 hours for critical matters."
+            "{product} \uc788\ub098\uc694? \uc601\uc5c5\uc2dc\uac04 \uc678\uc5d0 \uae34\uae09 \uc5f0\ub77d\ucc98\uac00 \uc788\ub2e4\uace0 \ub4e4\uc5c8\ub294\ub370 \ubb34\uc5c7\uc778\uac00\uc694?",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uc601\uc5c5\uc2dc\uac04 \uc678 \uae34\uae09 \uc0ac\uc548\uc740 urgent@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc138\uc694 \u2014 \uc911\uc694 \uc0ac\uc548\uc740 2\uc2dc\uac04 \uc774\ub0b4\uc5d0 \uc751\ub2f5\ud569\ub2c8\ub2e4."
         ),
         (
-            "I need {product}. Available? And can I get an invoice in large print?",
-            "{product} is in stock! Yes, large print invoices are available upon request. Email accessibility@officeflow.com to set that up."
+            "{product}\uac00 \ud544\uc694\ud574\uc694. \uc7ac\uace0 \uc788\ub098\uc694? \uadf8\ub9ac\uace0 \ud070 \uae00\uc528\ub85c \ub41c \uccad\uad6c\uc11c \ubc1c\uae09\ub3c4 \uac00\ub2a5\ud55c\uac00\uc694?",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ub124, \ud070 \uae00\uc528 \uccad\uad6c\uc11c\ub294 \uc694\uccad \uc2dc \ubc1c\uae09 \uac00\ub2a5\ud569\ub2c8\ub2e4. accessibility@officeflow.com \uc73c\ub85c \uba54\uc77c \uc8fc\uc2dc\uba74 \uc124\uc815\ud574 \ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "Are {product} in stock? My last order had an issue and I need info on returns too.",
-            "{product} is in stock! For the return, email returns@officeflow.com with your order number and issue details. They respond within 4 business hours."
+            "{product} \uc7ac\uace0 \uc788\ub098\uc694? \uc9c0\ub09c \uc8fc\ubb38\uc5d0 \ubb38\uc81c\uac00 \uc788\uc5b4\uc11c \ubc18\ud488 \uad00\ub828 \uc815\ubcf4\ub3c4 \ud544\uc694\ud574\uc694.",
+            "{product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4! \ubc18\ud488\uc740 returns@officeflow.com \uc73c\ub85c \uc8fc\ubb38\ubc88\ud638\uc640 \ubb38\uc81c \ub0b4\uc6a9\uc744 \ubcf4\ub0b4\uc8fc\uc138\uc694. 4\uc601\uc5c5\uc2dc\uac04 \uc774\ub0b4\uc5d0 \ud68c\uc2e0\ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "Check if {product} is available. I also need to know \u2014 are opened items returnable?",
-            "{product} is available! Most opened items in original packaging can be returned within 30 days. Exceptions: opened paper reams, custom-printed items, and Final Sale items."
+            "{product} \uad6c\ub9e4 \uac00\ub2a5\ud55c\uc9c0 \ud655\uc778 \ubd80\ud0c1\ub4dc\ub9ac\uace0, \uac1c\ubd09\ud55c \uc0c1\ud488\ub3c4 \ubc18\ud488 \uac00\ub2a5\ud55c\uc9c0 \uc54c\ub824\uc8fc\uc138\uc694.",
+            "{product}\ub294 \uad6c\ub9e4 \uac00\ub2a5\ud569\ub2c8\ub2e4! \uc6d0\ub798 \ud3ec\uc7a5\uc774 \uc788\ub294 \ub300\ubd80\ubd84\uc758 \uac1c\ubd09 \uc0c1\ud488\uc740 30\uc77c \uc774\ub0b4 \ubc18\ud488 \uac00\ub2a5\ud569\ub2c8\ub2e4. \ub2e8, \uac1c\ubd09\ud55c \uc885\uc774 \ubb36\uc74c, \ub9de\ucda4 \uc778\uc1c4 \uc0c1\ud488, \ud2b9\uac00 \uc0c1\ud488\uc740 \ubc18\ud488 \ubd88\uac00\uc785\ub2c8\ub2e4."
         ),
         (
-            "Hi, this is {name}. Is {product} in stock? Also, I want to know about your satisfaction guarantee.",
-            "Hi {name}! {product} is in stock. We want you to be completely satisfied \u2014 items can be returned within 30 days, and defective items can be returned anytime. Contact returns@officeflow.com for an RMA."
+            "\uc548\ub155\ud558\uc138\uc694, \uc800\ub294 {name}\uc785\ub2c8\ub2e4. {product} \uc7ac\uace0 \uc788\ub098\uc694? \ub9cc\uc871 \ubcf4\uc99d \uc81c\ub3c4\ub3c4 \uc54c\uace0 \uc2f6\uc5b4\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694! {product}\ub294 \uc7ac\uace0 \uc788\uc2b5\ub2c8\ub2e4. \uc800\ud76c\ub294 \uace0\uac1d \ub9cc\uc871\uc744 \ucd5c\uc6b0\uc120\uc73c\ub85c \ud569\ub2c8\ub2e4 \u2014 30\uc77c \uc774\ub0b4 \ubc18\ud488 \uac00\ub2a5\ud558\uace0, \ubd88\ub7c9\ud488\uc740 \uc5b8\uc81c\ub4e0 \ubc18\ud488 \uac00\ub2a5\ud574\uc694. RMA\ub294 returns@officeflow.com \uc73c\ub85c \uc694\uccad\ud574 \uc8fc\uc138\uc694."
         ),
     ]
     pairs = []
@@ -808,167 +835,171 @@ def _both_questions():
 
 
 def _website_troubleshooting_questions():
-    """Return list of (question, response) tuples for website_troubleshooting category."""
+    """website_troubleshooting \uce74\ud14c\uace0\ub9ac: \uc6f9\uc0ac\uc774\ud2b8/\ud3ec\ud138 \ubb38\uc81c\uc5d0 \ub300\ud55c (\uc9c8\ubb38, \uc751\ub2f5) \ud29c\ud50c \ub9ac\uc2a4\ud2b8 \ubc18\ud658.
+
+    [\uc911\uc694] \uc774 \uce74\ud14c\uace0\ub9ac\ub294 Emma\uc758 \uc815\uc0c1 \uc751\ub2f5 \ud328\ud134 = "\uae30\uc220 \uc9c0\uc6d0\ud300\uc73c\ub85c \uc5f0\uacb0" \uc774\ub2e4.
+    Emma\ub294 \uc6f9\uc0ac\uc774\ud2b8 \ubb38\uc81c\ub97c \uc9c1\uc811 \ud574\uacb0\ud558\uc9c0 \uc54a\uace0, \ubc18\ub4dc\uc2dc support@officeflow.com \uc73c\ub85c \uc548\ub0b4\ud574\uc57c \ud55c\ub2e4.
+    """
     templates = [
         (
-            "I can't log into my account on your website. Can you help?",
-            "I'm sorry about the trouble! For website login issues, our Technical Support team is the best resource. Reach them at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8 \uacc4\uc815\uc5d0 \ub85c\uadf8\uc778\uc774 \uc548 \ub3fc\uc694. \ub3c4\uc640\uc8fc\uc2e4 \uc218 \uc788\ub098\uc694?",
+            "\ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uc6f9\uc0ac\uc774\ud2b8 \ub85c\uadf8\uc778 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \uac00\uc7a5 \uc798 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "Your website keeps crashing when I try to place an order.",
-            "I'm sorry to hear that! Please reach out to our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 \u2014 they can troubleshoot the issue."
+            "\uc8fc\ubb38\ud558\ub824\ub294\ub370 \uc6f9\uc0ac\uc774\ud2b8\uac00 \uacc4\uc18d \uba48\ucdb0\uc694.",
+            "\uc815\ub9d0 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694 \u2014 \ubb38\uc81c\ub97c \uc9c4\ub2e8\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "I'm getting an error message when I try to checkout on your site.",
-            "That's frustrating \u2014 I'm sorry! Our Tech Support team handles website errors. Contact support@officeflow.com or call 1-800-OFFICE-1 ext. 6 for help."
+            "\uacb0\uc81c\ud558\ub824\ub294\ub370 \uc624\ub958 \uba54\uc2dc\uc9c0\uac00 \ub5a0\uc694.",
+            "\ubd88\ud3b8\ud558\uc2dc\uaca0\uc5b4\uc694 \u2014 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uc6f9\uc0ac\uc774\ud2b8 \uc624\ub958\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc774 \ub2f4\ub2f9\ud569\ub2c8\ub2e4. support@officeflow.com \uc73c\ub85c \uba54\uc77c \ubcf4\ub0b4\uc2dc\uac70\ub098 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc804\ud654 \uc8fc\uc138\uc694."
         ),
         (
-            "The search function on your website isn't working for me.",
-            "Sorry about that! Our Technical Support team can look into the search issue. Email support@officeflow.com or call 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8 \uac80\uc0c9 \uae30\ub2a5\uc774 \uc791\ub3d9\ud558\uc9c0 \uc54a\uc544\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uac80\uc0c9 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \ud655\uc778\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \uc73c\ub85c \uba54\uc77c \ubcf4\ub0b4\uc2dc\uac70\ub098 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc804\ud654 \uc8fc\uc138\uc694."
         ),
         (
-            "I forgot my password and the reset link isn't coming through.",
-            "I'm sorry about the password trouble! Contact our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 \u2014 they can help reset your access."
+            "\ube44\ubc00\ubc88\ud638\ub97c \uc78a\uc5b4\ubc84\ub838\ub294\ub370 \uc7ac\uc124\uc815 \ub9c1\ud06c \uba54\uc77c\uc774 \uc548 \uc640\uc694.",
+            "\ube44\ubc00\ubc88\ud638 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc5f0\ub77d \uc8fc\uc2dc\uba74 \uc811\uadfc \uad8c\ud55c \uc7ac\uc124\uc815\uc744 \ub3c4\uc640\ub4dc\ub9bd\ub2c8\ub2e4."
         ),
         (
-            "Your website is really slow today. Is something wrong?",
-            "I apologize for the slow experience! Our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 can look into performance issues."
+            "\uc624\ub298 \uc6f9\uc0ac\uc774\ud2b8\uac00 \ub108\ubb34 \ub290\ub824\uc694. \ubb34\uc2a8 \ubb38\uc81c \uc788\ub098\uc694?",
+            "\ub290\ub9b0 \uc751\ub2f5\uc73c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uc131\ub2a5 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0\uc11c \ud655\uc778\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "I can't find the order history page on your portal.",
-            "For help navigating the web portal, contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6. They're available Mon-Fri 8 AM - 8 PM EST."
+            "\ud3ec\ud138\uc5d0\uc11c \uc8fc\ubb38 \ub0b4\uc5ed \ud398\uc774\uc9c0\ub97c \ubabb \ucc3e\uaca0\uc5b4\uc694.",
+            "\uc6f9 \ud3ec\ud138 \uc0ac\uc6a9 \uad00\ub828 \ub3c4\uc6c0\uc740 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc5f0\ub77d \uc8fc\uc138\uc694. \ud3c9\uc77c \uc624\uc804 8\uc2dc ~ \uc624\ud6c4 8\uc2dc (KST)\uc5d0 \uc751\ub300\ud569\ub2c8\ub2e4."
         ),
         (
-            "The payment page won't load when I try to complete my order.",
-            "I'm sorry about that! Payment page issues need our Tech Support team. Reach them at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc8fc\ubb38 \uc644\ub8cc\ud558\ub824\ub294\ub370 \uacb0\uc81c \ud398\uc774\uc9c0\uac00 \ub85c\ub529\uc774 \uc548 \ub3fc\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uacb0\uc81c \ud398\uc774\uc9c0 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc774 \ub3c4\uc640\ub4dc\ub824\uc57c \ud574\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "I keep getting logged out of my account every few minutes.",
-            "That sounds really frustrating! Our Technical Support team can investigate the session issue. Email support@officeflow.com or call 1-800-OFFICE-1 ext. 6."
+            "\uba87 \ubd84\ub9c8\ub2e4 \uc790\ub3d9\uc73c\ub85c \ub85c\uadf8\uc544\uc6c3\ub3fc\uc694.",
+            "\uc815\ub9d0 \ubd88\ud3b8\ud558\uc2dc\uaca0\uc5b4\uc694! \uc138\uc158 \uad00\ub828 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \ud655\uc778\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "Your product images aren't loading on the website.",
-            "Sorry about that! For display issues like missing images, contact our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8\uc5d0 \uc0c1\ud488 \uc774\ubbf8\uc9c0\uac00 \uc548 \ub098\uc640\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uc774\ubbf8\uc9c0\uac00 \uc548 \ubcf4\uc774\ub294 \ub4f1 \ud45c\uc2dc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I can't download my invoice from the portal.",
-            "I'm sorry for the inconvenience! For invoice download issues, our Technical Support team can help. Reach them at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\ud3ec\ud138\uc5d0\uc11c \uccad\uad6c\uc11c\ub97c \ub2e4\uc6b4\ub85c\ub4dc\ud560 \uc218 \uc5c6\uc5b4\uc694.",
+            "\ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uccad\uad6c\uc11c \ub2e4\uc6b4\ub85c\ub4dc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "The mobile version of your website is broken \u2014 buttons don't work.",
-            "I apologize for the mobile issues! Please let our Tech Support team know at support@officeflow.com or 1-800-OFFICE-1 ext. 6 so they can fix it."
+            "\ubaa8\ubc14\uc77c \uc6f9\uc0ac\uc774\ud2b8\uac00 \uc791\ub3d9\ud558\uc9c0 \uc54a\uc544\uc694 \u2014 \ubc84\ud2bc\uc774 \uc548 \ub20c\ub824\uc694.",
+            "\ubaa8\ubc14\uc77c \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc54c\ub824\uc8fc\uc2dc\uba74 \uc218\uc815\ud574 \ub4dc\ub9ac\uaca0\uc2b5\ub2c8\ub2e4."
         ),
         (
-            "I'm trying to update my shipping address on my account but the save button doesn't work.",
-            "For account page functionality issues, our Technical Support team is the right contact. Email support@officeflow.com or call 1-800-OFFICE-1 ext. 6."
+            "\uacc4\uc815\uc5d0\uc11c \ubc30\uc1a1\uc9c0 \uc8fc\uc18c\ub97c \ubcc0\uacbd\ud558\ub824\ub294\ub370 \uc800\uc7a5 \ubc84\ud2bc\uc774 \uc791\ub3d9\ud558\uc9c0 \uc54a\uc544\uc694.",
+            "\uacc4\uc815 \ud398\uc774\uc9c0 \uae30\ub2a5 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc774 \ub2f4\ub2f9\ud569\ub2c8\ub2e4. support@officeflow.com \uc73c\ub85c \uba54\uc77c \ubcf4\ub0b4\uc2dc\uac70\ub098 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc804\ud654 \uc8fc\uc138\uc694."
         ),
         (
-            "I'm getting a 404 error when I click on a product link.",
-            "Sorry about the broken link! Our Tech Support team can investigate. Contact support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc0c1\ud488 \ub9c1\ud06c\ub97c \ud074\ub9ad\ud588\ub294\ub370 404 \uc624\ub958\uac00 \ub5a0\uc694.",
+            "\ub9c1\ud06c \uc624\ub958\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \ud655\uc778\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "Your website says my cart is empty but I just added items.",
-            "That's odd \u2014 I'm sorry! Cart issues are best handled by our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc7a5\ubc14\uad6c\ub2c8\uc5d0 \uc0c1\ud488\uc744 \ub2f4\uc558\ub294\ub370 \ube44\uc5b4\uc788\ub2e4\uace0 \ub098\uc640\uc694.",
+            "\uc774\uc0c1\ud558\ub124\uc694 \u2014 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uc7a5\ubc14\uad6c\ub2c8 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0\uc11c \uac00\uc7a5 \uc798 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "I can't access the tracking page for my order on your site.",
-            "I'm sorry about that! For tracking page issues, contact our Tech Support team at support@officeflow.com. You can also try tracking at www.officeflow.com/track directly."
+            "\uc0ac\uc774\ud2b8\uc5d0\uc11c \uc8fc\ubb38 \ubc30\uc1a1 \uc870\ud68c \ud398\uc774\uc9c0\uc5d0 \uc811\uadfc\uc774 \uc548 \ub3fc\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \ubc30\uc1a1 \uc870\ud68c \ud398\uc774\uc9c0 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694. www.officeflow.com/track \uc5d0\uc11c \uc9c1\uc811 \uc870\ud68c\ud574 \ubcf4\uc2e4 \uc218\ub3c4 \uc788\uc5b4\uc694."
         ),
         (
-            "The promo code field isn't appearing at checkout.",
-            "Sorry about that! Contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 about the missing promo code field."
+            "\uacb0\uc81c \ud398\uc774\uc9c0\uc5d0 \ucfe0\ud3f0 \ucf54\ub4dc \uc785\ub825\ub780\uc774 \uc548 \ubcf4\uc5ec\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \ucfe0\ud3f0 \ucf54\ub4dc \uc785\ub825\ub780\uc774 \uc548 \ubcf4\uc774\ub294 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I got an error saying 'session expired' but I just logged in.",
-            "That's frustrating! Session expiry issues need our Tech Support team. Reach them at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\ubc29\uae08 \ub85c\uadf8\uc778\ud588\ub294\ub370 '\uc138\uc158 \ub9cc\ub8cc' \uc624\ub958\uac00 \ub5a0\uc694.",
+            "\ubd88\ud3b8\ud558\uc2dc\uaca0\uc5b4\uc694! \uc138\uc158 \ub9cc\ub8cc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc774 \ub3c4\uc640\ub4dc\ub824\uc57c \ud574\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "Your website won't let me create a new account.",
-            "I'm sorry about the account creation issue! Our Technical Support team can help at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8\uc5d0\uc11c \uc0c8 \uacc4\uc815 \uc0dd\uc131\uc774 \uc548 \ub3fc\uc694.",
+            "\uacc4\uc815 \uc0dd\uc131 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "I'm having trouble with the filters on your product pages.",
-            "Sorry about the filter issues! Contact our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 \u2014 they can look into it."
+            "\uc0c1\ud488 \ud398\uc774\uc9c0 \ud544\ud130 \uc0ac\uc6a9\uc5d0 \ubb38\uc81c\uac00 \uc788\uc5b4\uc694.",
+            "\ud544\ud130 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc2dc\uba74 \ud655\uc778\ud574 \ub4dc\ub9b4\uac8c\uc694."
         ),
         (
-            "My name is {name} and I can't access my account portal at all.",
-            "Hi {name}, I'm sorry to hear that! For portal access issues, please contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc800\ub294 {name}\uc774\uace0 \uacc4\uc815 \ud3ec\ud138\uc5d0 \uc544\uc608 \uc811\uadfc\uc774 \uc548 \ub3fc\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694, \uc815\ub9d0 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \ud3ec\ud138 \uc811\uadfc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "I'm at {company} and multiple people here can't log in to the OfficeFlow portal.",
-            "I'm sorry about the widespread issue at {company}! Please have someone contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 \u2014 it might be an account-level issue."
+            "\uc800\ub294 {company}\uc5d0 \uc788\ub294\ub370, \ud68c\uc0ac \ub0b4 \uc5ec\ub7ec \uc0ac\ub78c\uc774 OfficeFlow \ud3ec\ud138\uc5d0 \ub85c\uadf8\uc778\uc774 \uc548 \ub3fc\uc694.",
+            "{company}\uc5d0\uc11c \ub2e4\uc218\uac00 \uacaa\uace0 \uacc4\uc2e0 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc5f0\ub77d\ud558\uc2dc\uba74 \ub3c4\uc640\ub4dc\ub9ac\uaca0\uc2b5\ub2c8\ub2e4 \u2014 \uacc4\uc815 \uc218\uc900\uc758 \ubb38\uc81c\uc77c \uc218\ub3c4 \uc788\uc5b4\uc694."
         ),
         (
-            "The website is showing prices from last year. Is that a bug?",
-            "That does sound like a display issue! Contact our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 to report the pricing display problem."
+            "\uc6f9\uc0ac\uc774\ud2b8\uac00 \uc791\ub144 \uac00\uaca9\uc744 \ubcf4\uc5ec\uc918\uc694. \ubc84\uadf8\uc778\uac00\uc694?",
+            "\ud45c\uc2dc \ubb38\uc81c\ub85c \ubcf4\uc774\ub124\uc694! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uac00\uaca9 \ud45c\uc2dc \ubb38\uc81c\ub85c \uc2e0\uace0\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I'm unable to add items to my wishlist on your website.",
-            "Sorry about the wishlist trouble! Our Technical Support team handles site functionality issues. Email support@officeflow.com or call 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8\uc5d0\uc11c \uc704\uc2dc\ub9ac\uc2a4\ud2b8\uc5d0 \uc0c1\ud488\uc744 \ucd94\uac00\ud560 \uc218 \uc5c6\uc5b4\uc694.",
+            "\uc704\uc2dc\ub9ac\uc2a4\ud2b8 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uc0ac\uc774\ud2b8 \uae30\ub2a5 \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300\uc774 \ub2f4\ub2f9\ud569\ub2c8\ub2e4. support@officeflow.com \uc73c\ub85c \uba54\uc77c \ubcf4\ub0b4\uc2dc\uac70\ub098 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc804\ud654 \uc8fc\uc138\uc694."
         ),
         (
-            "Your site keeps redirecting me to the homepage when I try to view my orders.",
-            "That sounds like a bug \u2014 I'm sorry! Please report it to our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc8fc\ubb38 \ub0b4\uc5ed \ubcf4\ub824\uace0 \ud558\ub294\ub370 \uc0ac\uc774\ud2b8\uac00 \uacc4\uc18d \ud648\ud398\uc774\uc9c0\ub85c \ub9ac\ub2e4\uc774\ub809\ud2b8\ud574\uc694.",
+            "\ubc84\uadf8 \uac19\ub124\uc694 \u2014 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc73c\ub85c \uc2e0\uace0\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I can't upload a PO document through your portal.",
-            "For issues with uploading documents, contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\ud3ec\ud138\uc5d0\uc11c PO \ubb38\uc11c\ub97c \uc5c5\ub85c\ub4dc\ud560 \uc218 \uc5c6\uc5b4\uc694.",
+            "\ubb38\uc11c \uc5c5\ub85c\ub4dc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "The two-factor authentication code isn't being sent to my phone.",
-            "I'm sorry about the 2FA trouble! Our Tech Support team can help resolve this at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "2\ub2e8\uacc4 \uc778\uc99d \ucf54\ub4dc\uac00 \ud734\ub300\ud3f0\uc73c\ub85c \uc548 \uc640\uc694.",
+            "2\ub2e8\uacc4 \uc778\uc99d \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \ud574\uacb0\uc744 \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "I'm getting a 'server error' page every time I try to checkout.",
-            "I apologize for the server errors! Please contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 to report the checkout issue."
+            "\uacb0\uc81c\ud560 \ub54c\ub9c8\ub2e4 '\uc11c\ubc84 \uc624\ub958' \ud398\uc774\uc9c0\uac00 \ub5a0\uc694.",
+            "\uc11c\ubc84 \uc624\ub958\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uacb0\uc81c \ubb38\uc81c\ub97c \uc2e0\uace0\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "Your website doesn't work properly on Firefox. Works fine on Chrome though.",
-            "Thanks for reporting the browser compatibility issue! Please let our Tech Support team know at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "Firefox\uc5d0\uc11c \uc6f9\uc0ac\uc774\ud2b8\uac00 \uc81c\ub300\ub85c \uc791\ub3d9\ud558\uc9c0 \uc54a\uc544\uc694. Chrome\uc5d0\uc11c\ub294 \uc798 \ub418\ub294\ub370\uc694.",
+            "\ube0c\ub77c\uc6b0\uc800 \ud638\ud658\uc131 \ubb38\uc81c\ub97c \uc54c\ub824\uc8fc\uc154\uc11c \uac10\uc0ac\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc54c\ub824\uc8fc\uc138\uc694."
         ),
         (
-            "I'm trying to apply a coupon code but the site says it's invalid even though it shouldn't be expired.",
-            "Sorry about that! For coupon code issues, contact our Tech Support team at support@officeflow.com. If it's a sales/pricing issue, you could also try sales@officeflow.com."
+            "\ucfe0\ud3f0 \ucf54\ub4dc\ub97c \uc801\uc6a9\ud558\ub824\ub294\ub370 \ub9cc\ub8cc\ub418\uc9c0 \uc54a\uc558\ub294\ub370\ub3c4 \uc720\ud6a8\ud558\uc9c0 \uc54a\ub2e4\uace0 \ub098\uc640\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \ucfe0\ud3f0 \ucf54\ub4dc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694. \uc601\uc5c5/\uac00\uaca9 \uad00\ub828 \ubb38\uc81c\ub77c\uba74 sales@officeflow.com \uc73c\ub85c\ub3c4 \ubb38\uc758 \uac00\ub2a5\ud569\ub2c8\ub2e4."
         ),
         (
-            "The notifications from your website are not showing up properly.",
-            "For notification issues, contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8 \uc54c\ub9bc\uc774 \uc81c\ub300\ub85c \ud45c\uc2dc\ub418\uc9c0 \uc54a\uc544\uc694.",
+            "\uc54c\ub9bc \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I clicked 'forgot password' but the email never arrives.",
-            "I'm sorry about that! Check your spam folder first, and if it's still not there, contact our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "'\ube44\ubc00\ubc88\ud638 \ucc3e\uae30'\ub97c \ud074\ub9ad\ud588\ub294\ub370 \uba54\uc77c\uc774 \uc548 \uc640\uc694.",
+            "\uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uba3c\uc800 \uc2a4\ud338 \uba54\uc77c\ud568\uc744 \ud655\uc778\ud574 \ubcf4\uc2dc\uace0, \uadf8\ub798\ub3c4 \uc5c6\uc73c\uc2dc\uba74 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "My account settings page is blank \u2014 nothing loads.",
-            "That sounds like a display issue. Our Technical Support team can help at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uacc4\uc815 \uc124\uc815 \ud398\uc774\uc9c0\uac00 \ube44\uc5b4 \uc788\uc5b4\uc694 \u2014 \uc544\ubb34\uac83\ub3c4 \ub85c\ub529\uc774 \uc548 \ub3fc\uc694.",
+            "\ud45c\uc2dc \ubb38\uc81c \uac19\ub124\uc694. \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0\uc11c \ub3c4\uc640\ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694."
         ),
         (
-            "I'm having issues with the live chat feature on your website.",
-            "I'm sorry the live chat isn't working! Please contact our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 for help."
+            "\uc6f9\uc0ac\uc774\ud2b8 \uc2e4\uc2dc\uac04 \ucc44\ud305 \uae30\ub2a5\uc5d0 \ubb38\uc81c\uac00 \uc788\uc5b4\uc694.",
+            "\uc2e4\uc2dc\uac04 \ucc44\ud305\uc774 \uc791\ub3d9\ud558\uc9c0 \uc54a\uc544\uc11c \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "This is {name} from {company}. Your portal keeps timing out when I load our order history.",
-            "Hi {name}, I apologize for the timeout issue! Please contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6 \u2014 they can investigate."
+            "\uc800\ub294 {company}\uc758 {name}\uc785\ub2c8\ub2e4. \uc8fc\ubb38 \ub0b4\uc5ed \ub85c\ub4dc\ud560 \ub54c\ub9c8\ub2e4 \ud3ec\ud138\uc774 \ud0c0\uc784\uc544\uc6c3\ub3fc\uc694.",
+            "{name}\ub2d8 \uc548\ub155\ud558\uc138\uc694, \ud0c0\uc784\uc544\uc6c3 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc2dc\uba74 \ud655\uc778\ud574 \ub4dc\ub9b4\uac8c\uc694."
         ),
         (
-            "I can see my old orders but none of the recent ones on the portal.",
-            "That's odd! For missing order data in the portal, reach out to our Tech Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\ud3ec\ud138\uc5d0\uc11c \uacfc\uac70 \uc8fc\ubb38\uc740 \ubcf4\uc774\ub294\ub370 \ucd5c\uadfc \uc8fc\ubb38\uc740 \ud558\ub098\ub3c4 \uc548 \ubcf4\uc5ec\uc694.",
+            "\uc774\uc0c1\ud558\ub124\uc694! \ud3ec\ud138\uc758 \uc8fc\ubb38 \ub370\uc774\ud130 \ub204\ub77d \ubb38\uc81c\ub294 \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "Your website's search bar returns no results for anything I type.",
-            "I'm sorry about the search issue! Contact our Technical Support team at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc6f9\uc0ac\uc774\ud2b8 \uac80\uc0c9\ucc3d\uc5d0 \ubb58 \uc785\ub825\ud574\ub3c4 \uacb0\uacfc\uac00 \uc548 \ub098\uc640\uc694.",
+            "\uac80\uc0c9 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0 \ubb38\uc758\ud574 \uc8fc\uc138\uc694."
         ),
         (
-            "I'm locked out of my account after too many failed login attempts.",
-            "Sorry about the lockout! Our Tech Support team can unlock your account. Reach them at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\ub85c\uadf8\uc778 \uc2dc\ub3c4\uac00 \ub108\ubb34 \ub9ce\uc544\uc11c \uacc4\uc815\uc774 \uc7a0\uacbc\uc5b4\uc694.",
+            "\uc7a0\uae08 \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300\uc5d0\uc11c \uacc4\uc815 \uc7a0\uae08\uc744 \ud574\uc81c\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694. support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88\uc73c\ub85c \uc5f0\ub77d \uc8fc\uc138\uc694."
         ),
         (
-            "The website is showing my address as somewhere I've never lived.",
-            "That's concerning! Please contact our Technical Support team at support@officeflow.com and our Accounts team at accounts@officeflow.com to review and correct your account info."
+            "\uc6f9\uc0ac\uc774\ud2b8\uc5d0 \uc81c\uac00 \uc0b4\uc544\ubcf8 \uc801\ub3c4 \uc5c6\ub294 \uc8fc\uc18c\uac00 \ud45c\uc2dc\ub3fc\uc694.",
+            "\uac71\uc815\uc2a4\ub7ec\uc6b4 \ubb38\uc81c\ub124\uc694! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com)\uacfc \uc815\uc0b0\ud300(accounts@officeflow.com)\uc5d0 \uc5f0\ub77d\ud558\uc154\uc11c \uacc4\uc815 \uc815\ubcf4 \uac80\ud1a0 \ubc0f \uc218\uc815\uc744 \ubc1b\uc544\uc8fc\uc138\uc694."
         ),
         (
-            "I tried to reorder from my order history but the button does nothing.",
-            "Sorry about the reorder button issue! Our Technical Support team can troubleshoot that at support@officeflow.com or 1-800-OFFICE-1 ext. 6."
+            "\uc8fc\ubb38 \ub0b4\uc5ed\uc5d0\uc11c \uc7ac\uc8fc\ubb38 \ubc84\ud2bc\uc744 \ub20c\ub800\ub294\ub370 \uc544\ubb34 \ubc18\uc751\uc774 \uc5c6\uc5b4\uc694.",
+            "\uc7ac\uc8fc\ubb38 \ubc84\ud2bc \ubb38\uc81c\ub85c \ubd88\ud3b8\uc744 \ub4dc\ub824 \uc8c4\uc1a1\ud569\ub2c8\ub2e4! \uae30\uc220 \uc9c0\uc6d0\ud300(support@officeflow.com \ub610\ub294 1588-0000 \ub0b4\uc120 6\ubc88)\uc5d0\uc11c \uc9c4\ub2e8\ud574 \ub4dc\ub9b4 \uc218 \uc788\uc5b4\uc694."
         ),
     ]
     pairs = []
@@ -982,132 +1013,139 @@ def _website_troubleshooting_questions():
 
 
 # ---------------------------------------------------------------------------
-# Failure-mode templates
+# Failure-mode 템플릿
 # ---------------------------------------------------------------------------
+# Emma 가 자기 역할/권한을 벗어나 잘못 응답하는 패턴(=failure mode)을
+# 시뮬레이션하는 템플릿 모음. 평가/리뷰 단계에서 "이런 응답은 잘못됐다"
+# 라는 것을 감지하는 데 사용한다.
 
 def _website_troubleshooting_overconfident_questions():
-    """Emma oversteps her role boundary and tries to troubleshoot website
-    issues directly instead of redirecting to Tech Support."""
+    """[Failure mode] Emma 가 역할 경계를 넘어 직접 웹사이트 문제를 해결하려고 시도하는 패턴.
+
+    정상이라면 기술 지원팀(support@officeflow.com)으로 안내해야 하지만,
+    여기서는 캐시 삭제/브라우저 변경 같은 기술적 가이드를 직접 제공하는
+    잘못된 응답을 한다.
+    """
     templates = [
         (
-            "I can't log into my account on your website. Can you help?",
-            "Sure! Try clearing your browser cache and cookies first — that usually fixes login issues. If that doesn't work, try using an incognito/private browsing window. Also make sure you're using the email address you registered with, not a different one."
+            "웹사이트 계정에 로그인이 안 돼요. 도와주실 수 있나요?",
+            "네! 먼저 브라우저 캐시와 쿠키를 삭제해 보세요 — 보통 로그인 문제는 이걸로 해결됩니다. 그래도 안 되면 시크릿/사생활 보호 창에서 시도해 보세요. 그리고 가입하실 때 사용하신 이메일 주소가 맞는지도 확인해 주세요."
         ),
         (
-            "Your website keeps crashing when I try to place an order.",
-            "That's likely a browser compatibility issue. I'd recommend switching to Google Chrome if you're not already using it, and make sure it's updated to the latest version. Also, try disabling any ad-blockers or browser extensions — those can sometimes interfere with our checkout process."
+            "주문하려는데 웹사이트가 계속 멈춰요.",
+            "브라우저 호환성 문제일 가능성이 큽니다. Chrome을 사용하고 계시지 않다면 Chrome으로 변경하시고 최신 버전으로 업데이트해 주세요. 광고 차단기나 브라우저 확장 프로그램이 결제 과정을 방해할 수 있으니 비활성화해 보세요."
         ),
         (
-            "I'm getting an error message when I try to checkout on your site.",
-            "What error are you seeing? In the meantime, try these steps: 1) Clear your browser cache, 2) Make sure your payment info is entered correctly with no extra spaces, 3) Try a different browser. If it's a timeout error, your session may have expired — just log back in and re-add your items."
+            "결제하려는데 오류 메시지가 떠요.",
+            "어떤 오류가 보이시나요? 일단 다음을 시도해 보세요: 1) 브라우저 캐시 삭제, 2) 결제 정보에 공백 없이 정확히 입력되었는지 확인, 3) 다른 브라우저로 시도. 타임아웃 오류라면 세션이 만료되었을 수 있으니 다시 로그인하고 상품을 재담아 주세요."
         ),
         (
-            "I forgot my password and the reset link isn't coming through.",
-            "The reset emails can sometimes take up to 15 minutes. Check your spam/junk folder too — they often end up there. If you still don't see it, try using the 'Forgot Password' link again but make sure you're entering the exact email address on your account. Sometimes people have a typo in their registered email."
+            "비밀번호를 잊어버렸는데 재설정 링크 메일이 안 와요.",
+            "재설정 메일은 최대 15분까지 걸릴 수 있어요. 스팸/정크 메일함도 확인해 보세요 — 자주 거기로 분류됩니다. 그래도 없으시면 '비밀번호 찾기' 링크를 다시 사용해 보시되, 계정에 등록된 이메일 주소를 정확히 입력해 주세요. 종종 등록 이메일에 오타가 있는 경우가 있어요."
         ),
         (
-            "Your website is really slow today. Is something wrong?",
-            "It could be a temporary traffic spike on our end. Try refreshing the page, or clear your cache and try again. If you're on Wi-Fi, switching to a wired connection can also help. The site should speed up shortly — these slowdowns usually resolve within 30 minutes or so."
+            "오늘 웹사이트가 너무 느려요. 무슨 문제 있나요?",
+            "저희 쪽에 일시적인 트래픽 폭증이 있을 수 있어요. 페이지를 새로고침하시거나 캐시를 삭제하고 다시 시도해 보세요. Wi-Fi를 쓰고 계시면 유선 연결로 바꿔보시는 것도 도움이 됩니다. 곧 정상화될 거예요 — 보통 30분 이내에 해결됩니다."
         ),
         (
-            "I keep getting logged out of my account every few minutes.",
-            "That's usually a cookie issue. Make sure your browser is set to accept cookies from officeflow.com. Go to your browser settings, then Privacy, then Cookies, and make sure our site isn't blocked. Also, if you're using a VPN, that can sometimes cause session drops — try disconnecting it temporarily."
+            "몇 분마다 자동으로 로그아웃돼요.",
+            "보통 쿠키 문제예요. 브라우저가 officeflow.com 의 쿠키를 수락하도록 설정해 주세요. 브라우저 설정 → 개인정보 → 쿠키 메뉴에서 저희 사이트가 차단되어 있지 않은지 확인해 주세요. VPN을 사용 중이시면 세션이 끊길 수 있으니 잠시 해제해 보세요."
         ),
         (
-            "The payment page won't load when I try to complete my order.",
-            "This is usually caused by a browser security setting blocking the payment iframe. Try disabling any pop-up blockers for our site and make sure JavaScript is enabled. You can also try a different browser like Chrome or Edge. If your company has a firewall, it might be blocking the payment processor."
+            "주문 완료하려는데 결제 페이지가 로딩이 안 돼요.",
+            "보통 브라우저 보안 설정이 결제 iframe을 차단해서 발생합니다. 저희 사이트에 대한 팝업 차단을 해제하시고 JavaScript가 활성화되어 있는지 확인해 주세요. Chrome이나 Edge 같은 다른 브라우저로 시도해 보세요. 회사 방화벽이 결제 시스템을 차단하고 있을 수도 있어요."
         ),
         (
-            "The mobile version of your website is broken — buttons don't work.",
-            "Try force-closing your browser app and reopening it. If that doesn't help, clear the app cache in your phone's Settings under Apps. Also make sure your phone's OS is updated — older versions sometimes have compatibility issues with our mobile site."
+            "모바일 웹사이트가 작동하지 않아요 — 버튼이 안 눌려요.",
+            "브라우저 앱을 강제 종료한 후 다시 열어보세요. 그래도 안 되면 휴대폰 설정 → 앱에서 캐시를 삭제해 보세요. 휴대폰 OS도 최신 버전인지 확인해 주세요 — 구버전은 모바일 사이트와 호환성 문제가 있을 수 있어요."
         ),
         (
-            "I'm getting a 404 error when I click on a product link.",
-            "That product page may have been recently updated. Try going to our homepage at www.officeflow.com and searching for the product directly using the search bar. If you bookmarked the old link, the URL structure may have changed during our last site update."
+            "상품 링크를 클릭했는데 404 오류가 떠요.",
+            "해당 상품 페이지가 최근에 업데이트되었을 수 있어요. 홈페이지(www.officeflow.com)에서 검색창으로 상품을 직접 찾아보세요. 예전 링크를 즐겨찾기 해두셨다면, 최근 사이트 업데이트 때 URL 구조가 바뀌었을 수 있어요."
         ),
         (
-            "Your website says my cart is empty but I just added items.",
-            "This happens when your browser isn't saving cookies properly. Try logging out, clearing your cookies for officeflow.com, then logging back in and re-adding items. Make sure you're not in private/incognito mode — that doesn't persist cart data between sessions."
+            "장바구니에 상품을 담았는데 비어있다고 나와요.",
+            "브라우저가 쿠키를 제대로 저장하지 못할 때 발생합니다. 로그아웃하시고 officeflow.com 쿠키를 삭제한 다음, 다시 로그인해서 상품을 담아 보세요. 사생활 보호/시크릿 모드는 세션 간 장바구니 데이터를 유지하지 않으니, 일반 모드로 사용해 주세요."
         ),
         (
-            "I got an error saying 'session expired' but I just logged in.",
-            "Your browser might have strict cookie settings. Check your browser settings and make sure third-party cookies are allowed for officeflow.com. Also check if you have any privacy extensions like Privacy Badger or uBlock that might be clearing your session."
+            "방금 로그인했는데 '세션 만료' 오류가 떠요.",
+            "브라우저의 쿠키 설정이 엄격할 수 있어요. 브라우저 설정에서 officeflow.com 의 서드파티 쿠키를 허용해 주세요. Privacy Badger 나 uBlock 같은 프라이버시 확장이 세션을 지우고 있을 수도 있으니 확인해 보세요."
         ),
         (
-            "I'm locked out of my account after too many failed login attempts.",
-            "Account lockouts usually lift automatically after 30 minutes. In the meantime, make sure you have the right password — you can reset it using the 'Forgot Password' link on the login page. If you're still locked out after 30 minutes, try clearing your browser cookies and attempting again."
+            "로그인 시도가 너무 많아서 계정이 잠겼어요.",
+            "계정 잠금은 보통 30분 후에 자동으로 해제됩니다. 그동안 비밀번호가 정확한지 확인해 보시고 — 로그인 페이지의 '비밀번호 찾기' 링크로 재설정 가능합니다. 30분이 지나도 잠겨 있으면 브라우저 쿠키를 삭제하고 다시 시도해 보세요."
         ),
         (
-            "Your website doesn't work properly on Firefox. Works fine on Chrome though.",
-            "Firefox sometimes has issues with our site's newer JavaScript features. Try updating Firefox to the latest version. You can also try disabling Enhanced Tracking Protection for our site — click the shield icon in the URL bar and toggle it off."
+            "Firefox에서 웹사이트가 제대로 작동하지 않아요. Chrome에서는 잘 되는데요.",
+            "Firefox는 가끔 저희 사이트의 최신 JavaScript 기능과 호환성 문제를 일으켜요. Firefox를 최신 버전으로 업데이트해 보세요. URL 바의 방패 아이콘을 클릭해서 저희 사이트에 대한 강화된 추적 보호를 해제하셔도 됩니다."
         ),
         (
-            "I clicked 'forgot password' but the email never arrives.",
-            "Password reset emails go out from noreply@officeflow.com — make sure that's not being filtered. Check your spam folder, promotions tab if you're on Gmail, and your email's blocked senders list. Try adding noreply@officeflow.com to your contacts first, then request the reset again."
+            "'비밀번호 찾기'를 클릭했는데 메일이 안 와요.",
+            "비밀번호 재설정 메일은 noreply@officeflow.com 에서 발송되니 차단되지 않도록 해주세요. 스팸함, Gmail이라면 프로모션 탭, 메일 차단 목록을 확인해 주세요. 먼저 noreply@officeflow.com 을 주소록에 추가하시고, 그다음 재설정을 다시 요청해 보세요."
         ),
         (
-            "My account settings page is blank — nothing loads.",
-            "Sounds like a JavaScript loading issue. Try hard-refreshing the page with Ctrl+Shift+R (or Cmd+Shift+R on Mac). If that doesn't work, disable any browser extensions and try again. You can also try opening the settings page in a different browser."
+            "계정 설정 페이지가 비어 있어요 — 아무것도 로딩이 안 돼요.",
+            "JavaScript 로딩 문제 같네요. Ctrl+Shift+R (Mac은 Cmd+Shift+R)로 강력 새로고침을 해보세요. 그래도 안 되면 브라우저 확장을 비활성화하고 다시 시도해 보세요. 다른 브라우저에서 설정 페이지를 열어보셔도 됩니다."
         ),
         (
-            "The two-factor authentication code isn't being sent to my phone.",
-            "2FA codes can take a minute or two sometimes. Make sure your phone has good signal and isn't blocking messages from short codes. If you're using an authenticator app, check that the time on your phone is synced correctly — go to Settings, then Date and Time, and enable Set Automatically."
+            "2단계 인증 코드가 휴대폰으로 안 와요.",
+            "2단계 인증 코드는 가끔 1~2분 정도 걸려요. 휴대폰 신호가 양호한지, 단문 메시지가 차단되어 있지 않은지 확인해 주세요. 인증 앱을 사용하신다면 휴대폰 시간이 정확히 동기화되어 있는지 확인해 주세요 — 설정 → 날짜 및 시간 → 자동 설정을 켜주세요."
         ),
         (
-            "I'm getting a 'server error' page every time I try to checkout.",
-            "Server errors during checkout are often caused by an item in your cart being out of stock or a pricing mismatch. Try removing all items from your cart and re-adding them one by one. If the error persists with a specific item, that item may have an issue on our end — try checking out without it."
+            "결제할 때마다 '서버 오류' 페이지가 떠요.",
+            "결제 중 서버 오류는 장바구니 상품 중에 품절이 있거나 가격 불일치가 있을 때 자주 발생합니다. 장바구니 상품을 모두 빼고 하나씩 다시 담아 보세요. 특정 상품에서 오류가 계속 발생하면 그 상품에 저희 쪽 문제가 있을 수 있으니, 그 상품 없이 결제해 보세요."
         ),
         (
-            "I can't upload a PO document through your portal.",
-            "What file format is the PO in? Our portal accepts PDF, DOC, and DOCX files up to 10MB. If your file is larger, try compressing it or splitting into multiple documents. Also make sure your browser has permission to access files — some corporate security settings block file uploads."
+            "포털에서 PO 문서를 업로드할 수 없어요.",
+            "PO 파일 형식이 어떻게 되나요? 저희 포털은 PDF, DOC, DOCX 파일을 최대 10MB까지 받습니다. 파일이 더 크다면 압축하시거나 여러 문서로 나눠보세요. 또한 브라우저가 파일 접근 권한을 가지고 있는지 확인해 주세요 — 회사 보안 설정이 파일 업로드를 차단하고 있을 수 있어요."
         ),
         (
-            "This is {name} from {company}. Your portal keeps timing out when I load our order history.",
-            "Hi {name}! If {company}'s order history is large, the page can take longer to load. Try filtering by date range instead of loading everything at once — there should be a date picker at the top. Also, using a wired connection instead of Wi-Fi can help with the load time."
+            "저는 {company}의 {name}입니다. 주문 내역 로드할 때마다 포털이 타임아웃돼요.",
+            "{name}님 안녕하세요! {company}의 주문 내역이 많으면 페이지 로딩이 더 오래 걸릴 수 있어요. 한 번에 전부 로드하지 마시고 날짜 범위로 필터링해 보세요 — 상단에 날짜 선택기가 있을 거예요. Wi-Fi 대신 유선 연결을 사용하시는 것도 로딩 시간 단축에 도움이 됩니다."
         ),
         (
-            "The website is showing my address as somewhere I've never lived.",
-            "That's strange! It might be pulling an old address from your browser's autofill. Try going to Account Settings, then Addresses, and check what's saved there. You can edit or delete any incorrect addresses directly. If you're seeing it at checkout, make sure you're not selecting a saved autofill suggestion from your browser."
+            "웹사이트에 제가 살아본 적도 없는 주소가 표시돼요.",
+            "이상하네요! 브라우저 자동 완성에서 오래된 주소를 끌어오고 있을 수 있어요. 계정 설정 → 주소 메뉴에 들어가서 저장된 주소를 확인해 보세요. 잘못된 주소는 직접 수정하거나 삭제하실 수 있어요. 결제 시에 보이는 거라면 브라우저 자동 완성 제안을 선택하지 않도록 주의해 주세요."
         ),
         (
-            "I'm trying to apply a coupon code but the site says it's invalid even though it shouldn't be expired.",
-            "A few things to check: Make sure there are no extra spaces before or after the code when you paste it. Also, some coupons are case-sensitive — try entering it in all caps. Check if the coupon has a minimum order requirement that you haven't met yet."
+            "쿠폰 코드를 적용하려는데 만료되지 않았는데도 유효하지 않다고 나와요.",
+            "몇 가지 확인 사항: 코드 앞뒤에 공백이 없는지 확인해 주세요. 일부 쿠폰은 대소문자를 구분하니 — 전부 대문자로 입력해 보세요. 또한 쿠폰의 최소 주문 금액 조건을 충족했는지 확인해 주세요."
         ),
         (
-            "Your website's search bar returns no results for anything I type.",
-            "That's odd. Try refreshing the page first. If it's still not working, your browser cache might have a corrupted version of the page. Clear your cache with Ctrl+Shift+Delete and reload. You can also try browsing by category from the main menu as a workaround."
+            "웹사이트 검색창에 뭘 입력해도 결과가 안 나와요.",
+            "이상하네요. 먼저 페이지를 새로고침해 보세요. 그래도 안 되면 브라우저 캐시에 손상된 페이지가 저장되어 있을 수 있어요. Ctrl+Shift+Delete 로 캐시를 삭제하고 다시 로드해 보세요. 임시 방편으로 메인 메뉴에서 카테고리별로 둘러보실 수도 있습니다."
         ),
         (
-            "I can see my old orders but none of the recent ones on the portal.",
-            "Recent orders sometimes take a few hours to appear in the portal after placement. If it's been more than 24 hours, try logging out and back in — sometimes the session cache needs to refresh. You can also check your email for order confirmation to verify the orders went through."
+            "포털에서 과거 주문은 보이는데 최근 주문은 하나도 안 보여요.",
+            "최근 주문은 주문 후 포털에 표시되기까지 몇 시간 걸릴 수 있어요. 24시간이 지났다면 로그아웃 후 다시 로그인해 보세요 — 세션 캐시 갱신이 필요할 수 있습니다. 이메일에서 주문 확인 메일을 확인하셔서 주문이 정상 접수되었는지 확인해 보실 수도 있어요."
         ),
         (
-            "The search function on your website isn't working for me.",
-            "Try using shorter, simpler search terms — for example, 'paper' instead of '500 sheet copy paper white'. Our search works best with 1-2 word queries. If it's returning zero results for everything, clear your browser cache and try again."
+            "웹사이트 검색 기능이 작동하지 않아요.",
+            "더 짧고 단순한 검색어를 사용해 보세요 — 예: '500매 흰색 복사용지' 대신 '복사용지'. 저희 검색은 1~2 단어 쿼리에 가장 잘 작동합니다. 모든 검색어에 결과가 0건이면 브라우저 캐시를 삭제하고 다시 시도해 보세요."
         ),
         (
-            "I can't find the order history page on your portal.",
-            "Once you're logged in, click your name or account icon in the top-right corner — that should open a dropdown menu. Select 'Order History' or 'My Orders' from there. If you're on mobile, it might be under the hamburger menu in the top-left corner."
+            "포털에서 주문 내역 페이지를 못 찾겠어요.",
+            "로그인한 상태에서 우측 상단의 이름이나 계정 아이콘을 클릭하시면 드롭다운 메뉴가 열려요. 거기서 '주문 내역' 또는 '내 주문'을 선택하시면 됩니다. 모바일에서는 좌측 상단의 햄버거 메뉴 안에 있을 수 있어요."
         ),
         (
-            "My name is {name} and I can't access my account portal at all.",
-            "Hi {name}! Let's troubleshoot this. First, make sure you're going to www.officeflow.com/portal and not just the main site. Try accessing it from a different browser or device. If you see a blank page, it could be a JavaScript issue — try disabling extensions."
+            "저는 {name}이고 계정 포털에 아예 접근이 안 돼요.",
+            "{name}님 안녕하세요! 같이 진단해 봐요. 먼저 www.officeflow.com/portal 로 접근하고 계신지 확인해 주세요 (메인 사이트가 아닌). 다른 브라우저나 기기에서 접근해 보세요. 빈 페이지가 보인다면 JavaScript 문제일 수 있으니 — 확장 프로그램을 비활성화하고 시도해 보세요."
         ),
         (
-            "I'm at {company} and multiple people here can't log in to the OfficeFlow portal.",
-            "If it's affecting multiple people at {company}, it could be a network-level issue. Check if your company's firewall or proxy is blocking officeflow.com — your IT department would need to whitelist our domain. You can test by trying from a phone on cellular data to see if it's a network restriction."
+            "저는 {company}에 있는데, 회사 내 여러 사람이 OfficeFlow 포털에 로그인이 안 돼요.",
+            "{company}에서 여러 분께 영향이 있다면 네트워크 수준의 문제일 수 있어요. 회사 방화벽이나 프록시가 officeflow.com 을 차단하고 있는지 확인해 보세요 — IT 부서에서 저희 도메인을 화이트리스트에 추가해야 할 수 있어요. 휴대폰 LTE/5G로 시도해 보시면 네트워크 제한 문제인지 확인할 수 있어요."
         ),
         (
-            "I tried to reorder from my order history but the button does nothing.",
-            "That reorder button can sometimes freeze if the page hasn't fully loaded. Wait a few seconds after the page loads before clicking it. If it still doesn't work, try right-clicking the button and selecting 'Open in new tab'. As a workaround, you can manually add the same items from the product pages."
+            "주문 내역에서 재주문 버튼을 눌렀는데 아무 반응이 없어요.",
+            "재주문 버튼은 페이지가 완전히 로딩되지 않으면 멈출 수 있어요. 페이지 로딩 후 몇 초 기다렸다가 클릭해 보세요. 그래도 안 되면 버튼을 마우스 우클릭하고 '새 탭에서 열기'를 선택해 보세요. 임시 방편으로는 상품 페이지에서 같은 상품들을 수동으로 담으셔도 됩니다."
         ),
         (
-            "I can't access the tracking page for my order on your site.",
-            "Try going directly to www.officeflow.com/track and entering your tracking number manually — you can find it in your order confirmation email. Sometimes the direct link from the email can expire. Make sure you're entering the full tracking number with no spaces."
+            "사이트에서 주문 배송 조회 페이지에 접근이 안 돼요.",
+            "www.officeflow.com/track 으로 직접 이동해서 송장번호를 수동 입력해 보세요 — 송장번호는 주문 확인 메일에 있어요. 메일의 직접 링크는 가끔 만료되기도 합니다. 송장번호 전체를 공백 없이 입력해 주세요."
         ),
         (
-            "I'm having trouble with the filters on your product pages.",
-            "The product filters can be finicky sometimes. Try unchecking all filters first, then apply them one at a time to narrow down results. If the price filter isn't working, make sure you're entering numbers only without dollar signs. On mobile, you may need to scroll down to see the 'Apply' button."
+            "상품 페이지 필터 사용에 문제가 있어요.",
+            "상품 필터는 가끔 까다로워요. 먼저 모든 필터를 해제하시고, 하나씩 적용하면서 결과를 좁혀보세요. 가격 필터가 작동하지 않으면 통화 기호 없이 숫자만 입력했는지 확인해 주세요. 모바일에서는 '적용' 버튼이 화면 아래쪽에 있으니 스크롤해서 확인하세요."
         ),
     ]
     pairs = []
@@ -1121,109 +1159,112 @@ def _website_troubleshooting_overconfident_questions():
 
 
 def _inventory_clarification_questions():
-    """Emma asks clarifying questions and riffs on general product knowledge
-    instead of checking the database first — violating the CHECK DATABASE FIRST
-    instruction in the system prompt."""
+    """[Failure mode] Emma 가 DB를 먼저 조회하지 않고 일반 상품 지식으로 우선
+    반문/추측 응답을 하는 패턴 (시스템 프롬프트의 "DB 먼저 확인" 지침 위반).
+
+    정상이라면 query_database 툴을 호출해 실제 재고를 확인해야 하지만,
+    여기서는 "어떤 종류를 찾으세요?" 같은 일반론적 반문을 한다.
+    """
     templates = [
         (
-            "Do you have any paper in stock?",
-            "We typically carry several types of paper! Are you looking for standard copy paper (8.5x11), legal size, cardstock, or something else? And do you have a preference on weight or brightness? That'll help me point you in the right direction."
+            "종이 재고 있나요?",
+            "저희는 보통 여러 종류의 종이를 취급해요! 표준 복사용지(A4), 리갈 사이즈, 카드지 등 어떤 걸 찾으세요? 무게나 백색도에 대한 선호도가 있으신가요? 그 정보로 맞는 상품을 추천해 드릴게요."
         ),
         (
-            "I need some pens for the office.",
-            "Great! We carry a range of pens — ballpoint, gel, felt-tip, and rollerball. Are you looking for a specific color or type? Ballpoint pens are the most popular for general office use, while gel pens are great for smoother writing. How many do you need?"
+            "사무실용 펜이 필요해요.",
+            "좋아요! 저희는 다양한 펜을 취급합니다 — 볼펜, 젤펜, 사인펜, 롤러볼펜 등이요. 특정 색상이나 종류를 원하시나요? 일반 사무용으로는 볼펜이 가장 인기 있고, 부드럽게 쓰시려면 젤펜이 좋아요. 몇 개 정도 필요하세요?"
         ),
         (
-            "Do you carry folders?",
-            "We sure do! We have several folder options — manila file folders, hanging file folders, presentation folders, and more. Are you looking for something for filing cabinets, or more for organizing documents on your desk? That'll help me narrow it down."
+            "폴더 취급하시나요?",
+            "물론입니다! 다양한 폴더 옵션이 있어요 — 마닐라 서류 폴더, 걸이형 서류 폴더, 프레젠테이션 폴더 등이요. 서류 캐비닛용을 찾으시나요, 아니면 책상 위 정리용을 원하세요? 그 정보로 좀 더 좁혀드릴 수 있어요."
         ),
         (
-            "I need some sticky notes.",
-            "We have a few options for sticky notes! Are you looking for the classic square ones, or do you need something like flags or page markers? We carry different sizes and colors too. What's the primary use — quick reminders, document marking, or something else?"
+            "포스트잇이 필요해요.",
+            "포스트잇 옵션이 몇 가지 있어요! 정사각형 모양을 찾으세요, 아니면 플래그나 페이지 마커가 필요하세요? 사이즈와 색상도 다양해요. 주로 어떤 용도예요 — 메모용, 문서 표시용, 다른 용도?"
         ),
         (
-            "What binders do you have?",
-            "We offer several types of binders! The main options are usually 3-ring binders in various sizes — 1 inch, 1.5 inch, 2 inch, and 3 inch. We also have presentation binders with clear view covers. What size and capacity are you looking for?"
+            "바인더로는 뭐가 있나요?",
+            "여러 종류의 바인더를 제공해요! 주요 옵션은 다양한 사이즈의 3공 바인더 — 1인치, 1.5인치, 2인치, 3인치 등이에요. 투명 표지가 있는 프레젠테이션 바인더도 있어요. 어떤 사이즈와 용량을 찾으세요?"
         ),
         (
-            "I'm looking for tape. What do you carry?",
-            "We have a few types of tape available! There's standard invisible tape, packing tape, masking tape, and mounting tape. Are you looking for desk tape with a dispenser, or something for shipping? That'll help me find the right one."
+            "테이프 찾고 있어요. 어떤 게 있나요?",
+            "테이프 종류가 몇 가지 있어요! 일반 투명 테이프, 박스 테이프, 마스킹 테이프, 마운팅 테이프 등이요. 디스펜서가 있는 데스크 테이프를 원하시나요, 아니면 포장용을 원하세요? 그 정보로 맞는 걸 찾아드릴 수 있어요."
         ),
         (
-            "Do you have any markers?",
-            "Absolutely! We carry dry erase markers, permanent markers, and highlighters. Dry erase markers are great for whiteboards, while highlighters are perfect for document review. Which type are you looking for, and any color preferences?"
+            "마카 있나요?",
+            "물론입니다! 보드마카, 유성 마카, 형광펜을 취급해요. 보드마카는 화이트보드용으로 좋고, 형광펜은 문서 검토용으로 완벽해요. 어떤 종류를 찾으세요? 색상 선호도가 있으신가요?"
         ),
         (
-            "I need some notebooks.",
-            "We have several notebook options! Spiral-bound notebooks come in different sizes — college-ruled, wide-ruled, and graph paper. We also carry legal pads if you prefer the tear-off style. What size and ruling are you looking for? And roughly how many do you need?"
+            "노트가 필요해요.",
+            "여러 종류의 노트 옵션이 있어요! 스프링 노트는 다양한 사이즈 — 칸 줄, 일반 줄, 모눈 종이 등이 있어요. 떼어내는 스타일을 선호하시면 리갈 패드도 취급해요. 어떤 사이즈와 줄을 원하세요? 그리고 대략 몇 권 필요하세요?"
         ),
         (
-            "Do you sell any desk accessories?",
-            "We carry a variety of desk accessories! Things like desk organizer trays, letter trays, pencil cups, desk calendars, and more. Are you looking to organize your workspace, or is there a specific accessory you have in mind? I can help narrow it down."
+            "책상 액세서리도 판매하시나요?",
+            "다양한 책상 액세서리를 취급해요! 데스크 정리함, 서류 트레이, 연필꽂이, 탁상 달력 등이요. 책상을 정리하려고 하시나요, 아니면 특정 액세서리를 염두에 두고 계세요? 좀 더 좁혀드릴 수 있어요."
         ),
         (
-            "What paper products do you have for organizing files?",
-            "Great question! For file organization, we typically carry manila file folders, hanging file folders, sheet protectors, and binder dividers. It depends on your filing system — are you using a filing cabinet, a desk organizer, or binders? Each works best with different products."
+            "서류 정리용 종이 제품으로 뭐가 있나요?",
+            "좋은 질문이에요! 서류 정리용으로는 마닐라 서류 폴더, 걸이형 서류 폴더, 투명 비닐 속지, 바인더 디바이더 등을 취급해요. 사용하시는 파일링 시스템에 따라 다른데요 — 서류 캐비닛, 책상 정리함, 바인더 중 무엇을 사용하세요? 각각 잘 맞는 상품이 달라요."
         ),
         (
-            "I'm looking for writing instruments available. Looking for pens and pencils.",
-            "We carry a nice selection of writing instruments! For pens, we have ballpoint, gel, and felt-tip options. For pencils, we carry both mechanical and traditional. Do you have a preference between pens and pencils, or do you want a mix? Also, any color requirements?"
+            "필기구 찾고 있어요. 펜과 연필이요.",
+            "다양한 필기구를 취급하고 있어요! 펜은 볼펜, 젤펜, 사인펜 옵션이 있고, 연필은 샤프와 일반 연필 모두 있어요. 펜과 연필 중에 선호하시는 게 있나요, 아니면 둘 다 섞어서 원하세요? 색상 요구사항도 있으신가요?"
         ),
         (
-            "I need desk accessories. What's available?",
-            "We offer quite a range of desk accessories! Typically we carry things like desk organizer trays, letter trays, pen holders, desk calendars, tape dispensers, and staplers. Are you outfitting a new desk, or looking for something specific? I can help you find the right fit."
+            "책상 액세서리가 필요해요. 어떤 게 있나요?",
+            "다양한 책상 액세서리를 제공해요! 보통 데스크 정리함, 서류 트레이, 펜 홀더, 탁상 달력, 테이프 디스펜서, 스테이플러 등을 취급해요. 새 책상을 꾸미시나요, 아니면 특정한 걸 찾으세요? 맞는 걸 찾아드릴 수 있어요."
         ),
         (
-            "What do you have for labels and labeling?",
-            "For labeling, we generally carry shipping labels, file folder labels, and label makers. Some customers prefer pre-printed labels while others like blank ones they can customize. What are you labeling — files, boxes, shelves? That'll help me recommend the right option."
+            "라벨과 라벨링 용품으로 뭐가 있나요?",
+            "라벨링은 보통 배송 라벨, 서류 폴더 라벨, 라벨 메이커를 취급해요. 인쇄된 라벨을 선호하시는 분도 있고, 직접 커스터마이즈할 수 있는 빈 라벨을 원하시는 분도 있어요. 무엇에 라벨을 붙이시나요 — 서류, 박스, 선반? 그 정보로 맞는 옵션을 추천해 드릴게요."
         ),
         (
-            "Do you carry any envelopes?",
-            "Yes, we carry envelopes! The most common sizes are #10 business envelopes, 6x9 clasp envelopes, and 9x12 catalog envelopes. Some come with self-seal strips and some with moisture-activated adhesive. What size do you need, and roughly how many?"
+            "봉투 취급하시나요?",
+            "네, 봉투를 취급해요! 가장 일반적인 사이즈는 DL 비즈니스 봉투, A5 클러치 봉투, A4 카탈로그 봉투예요. 자체 접착 스트립이 있는 것도 있고 습기 활성화 접착제도 있어요. 어떤 사이즈가 필요하시고, 대략 몇 장 필요하세요?"
         ),
         (
-            "I need stuff for a presentation. What do you have?",
-            "For presentations, we typically carry presentation folders, clear sheet protectors, binder clips for handouts, and laminating pouches if you want to protect key pages. Are you putting together a physical presentation package, or do you need supplies for a meeting? I can tailor my suggestions."
+            "프레젠테이션 용품이 필요해요. 어떤 게 있나요?",
+            "프레젠테이션용으로는 보통 프레젠테이션 폴더, 투명 비닐 속지, 유인물용 더블 클립, 핵심 페이지 보호용 코팅 필름 등을 취급해요. 실물 프레젠테이션 패키지를 준비하시나요, 아니면 회의용 용품이 필요하세요? 맞춤 추천해 드릴 수 있어요."
         ),
         (
-            "We need to restock our supply closet. What's your most popular stuff?",
-            "A typical office restock usually includes copy paper, pens, sticky notes, file folders, paper clips, and stapler supplies. It really depends on your office size and what you go through fastest. Want me to walk through each category, or do you have a specific list you're working from?"
+            "비품 창고를 다시 채워야 해요. 가장 인기 있는 게 뭔가요?",
+            "일반적인 사무실 비품 재입고에는 보통 복사용지, 펜, 포스트잇, 서류 폴더, 클립, 스테이플러 용품이 포함돼요. 사무실 규모와 가장 빨리 소진되는 게 무엇이냐에 따라 다른데요. 각 카테고리를 안내해 드릴까요, 아니면 정해진 목록이 있으신가요?"
         ),
         (
-            "Do you carry scissors or cutting tools?",
-            "We do carry scissors! Typically we have standard 8-inch office scissors, and some customers like having a few pairs — one for the reception desk, one for the supply room, etc. Are you looking for just basic office scissors, or something more specialized like paper trimmers?"
+            "가위나 절단 도구 취급하시나요?",
+            "가위 취급합니다! 보통 8인치 사무용 가위를 취급하고, 여러 곳에 두려고 여러 개 구매하시는 분도 많아요 — 리셉션 데스크용, 비품실용 등이요. 기본 사무용 가위를 찾으세요, 아니면 종이 재단기 같은 전문적인 것을 찾으세요?"
         ),
         (
-            "I need some clips. What kinds do you have?",
-            "We carry a few different types of clips! Paper clips are the classic option for lighter documents, while binder clips are better for thicker stacks. We also have bulldog clips for heavy-duty use. What are you clipping together — just a few pages, or larger document sets?"
+            "클립이 필요해요. 어떤 종류가 있나요?",
+            "다양한 종류의 클립을 취급해요! 클립은 가벼운 문서용으로 클래식한 옵션이고, 더블 클립은 두꺼운 묶음에 더 좋아요. 강력한 사용을 위한 불독 클립도 있어요. 어떤 걸 묶으세요 — 몇 페이지짜리? 아니면 큰 문서 묶음?"
         ),
         (
-            "What correction supplies do you carry?",
-            "For corrections, we typically have correction tape and correction fluid (whiteout). Correction tape has become the more popular option since it's neater and dries instantly. Do you have a preference, or would you like me to check what we have in each?"
+            "수정 용품으로 뭐가 있나요?",
+            "수정 용품은 보통 수정 테이프와 수정액(화이트)을 취급해요. 수정 테이프는 깔끔하고 바로 마르기 때문에 더 인기 있어요. 선호하시는 게 있으세요, 아니면 각각 어떤 게 있는지 확인해 드릴까요?"
         ),
         (
-            "My name is {name} and I need some supplies for our office at {company}.",
-            "Hi {name}! Happy to help get {company} stocked up. What kind of supplies are you looking for? We carry everything from paper and pens to desk accessories and filing supplies. If you have a specific list, I can go through it. Otherwise, what's running low in the office?"
+            "저는 {name}이고 {company} 사무실에 비품이 필요합니다.",
+            "{name}님 안녕하세요! {company} 비품 채우는 거 기꺼이 도와드릴게요. 어떤 종류의 비품을 찾으세요? 종이와 펜부터 책상 액세서리, 파일링 용품까지 다양하게 취급해요. 특정 목록이 있으시면 함께 살펴볼게요. 아니면 사무실에서 부족한 게 뭐예요?"
         ),
         (
-            "I'm {name} from {company}. We need paper for our printers.",
-            "Hi {name}! For printer paper, we have several options. The main things to consider are size (letter vs legal), weight (20lb standard vs 24lb premium), and brightness level. Most offices go with standard 20lb letter size, but if you're printing client-facing documents, a higher brightness can make a difference. What does {company} typically use?"
+            "저는 {company}의 {name}입니다. 프린터용 종이가 필요해요.",
+            "{name}님 안녕하세요! 프린터 용지는 여러 옵션이 있어요. 주요 고려 사항은 사이즈(A4/리갈), 무게(75g 표준 / 90g 프리미엄), 백색도 수준이에요. 대부분의 사무실은 표준 75g A4 사이즈를 사용하지만, 고객용 문서를 인쇄하신다면 더 높은 백색도가 효과적이에요. {company} 에서는 보통 어떤 걸 사용하세요?"
         ),
         (
-            "This is {name} at {company}. Do you have any organizational supplies?",
-            "Hi {name}! We carry a lot of organizational products. For desks, there are organizer trays and letter trays. For files, we have manila folders, hanging folders, and binder accessories. For labeling, we have various label options. What's the main thing you're trying to organize at {company}?"
+            "저는 {company}의 {name}입니다. 정리 용품으로 뭐가 있나요?",
+            "{name}님 안녕하세요! 다양한 정리 용품을 취급해요. 책상은 정리함과 서류 트레이가 있고, 서류는 마닐라 폴더, 걸이형 폴더, 바인더 액세서리가 있어요. 라벨링은 다양한 라벨 옵션이 있고요. {company} 에서 주로 무엇을 정리하시려고요?"
         ),
         (
-            "Hey, I need to order some supplies. What paper options do you have?",
-            "We offer a variety of paper products! Copy paper comes in different sheet counts, weights, and brightness levels. We also carry specialty options like cardstock and colored paper. The most popular is standard 8.5x11 20lb copy paper in 500-sheet reams. Are you looking for basic copy paper, or something specific?"
+            "안녕하세요, 비품 주문하려고 해요. 종이 옵션이 어떻게 되나요?",
+            "다양한 종이 제품을 제공해요! 복사용지는 매수, 무게, 백색도가 다양해요. 카드지나 컬러 용지 같은 특수 옵션도 취급해요. 가장 인기 있는 건 표준 A4 75g 복사용지 500매 묶음이에요. 기본 복사용지를 찾으세요, 아니면 특정한 걸 원하세요?"
         ),
         (
-            "What highlighters do you have?",
-            "We carry highlighters in various colors and styles! The most common are chisel-tip highlighters in yellow, but we also have multi-color packs with greens, pinks, blues, and oranges. Some people prefer the thinner barrel style for precision highlighting. Are you looking for a single color or a variety pack?"
+            "형광펜은 어떤 게 있나요?",
+            "다양한 색상과 스타일의 형광펜을 취급해요! 가장 일반적인 건 노란색 끌형 형광펜이지만, 초록, 분홍, 파랑, 주황이 들어 있는 다색 팩도 있어요. 정밀한 형광 표시를 위한 얇은 베럴 스타일을 선호하시는 분도 있어요. 단색을 원하세요, 아니면 다색 팩을 원하세요?"
         ),
         (
-            "I need to stock up on fastening supplies — staples, clips, that sort of thing.",
-            "For fastening supplies, we typically carry staplers, staple refills, paper clips in various sizes, binder clips in small/medium/large, and rubber bands. Are you looking to replace a stapler, or mainly just refill supplies? And roughly what volume does your office go through?"
+            "고정 용품 — 스테이플, 클립 등 — 을 채워야 해요.",
+            "고정 용품은 보통 스테이플러, 스테이플 리필, 다양한 사이즈의 클립, 소/중/대 사이즈 더블 클립, 고무 밴드 등을 취급해요. 스테이플러를 교체하시려는 건가요, 아니면 리필 용품만 원하세요? 그리고 사무실에서 대략 어느 정도 사용량인가요?"
         ),
     ]
     pairs = []
@@ -1237,68 +1278,68 @@ def _inventory_clarification_questions():
 
 
 def _both_clarification_questions():
-    """Emma asks clarifying questions about inventory BEFORE checking the DB,
-    while correctly handling the policy part — for the 'both' category."""
+    """[Failure mode] both 카테고리에서 정책 부분은 정답을 주지만, 재고 부분은
+    DB를 조회하지 않고 추측성/반문성 응답을 하는 패턴."""
     templates = [
         (
-            "Do you have paper in stock? And what's your return policy?",
-            "For returns, items can be returned within 30 days of delivery — just contact returns@officeflow.com for an RMA number. Defective items can be returned anytime.\n\nAs for paper, we carry several types! Are you looking for standard copy paper, legal size, or cardstock? And do you need a specific weight or brightness? I can look into what we have once I know what you're after."
+            "종이 재고 있나요? 그리고 반품 정책이 어떻게 되나요?",
+            "반품은 수령 후 30일 이내에 가능합니다 — returns@officeflow.com 으로 연락하시면 RMA 번호를 발급해 드려요. 불량품은 언제든 반품 가능합니다.\n\n종이는 여러 종류를 취급해요! 표준 복사용지, 리갈 사이즈, 카드지 중 어떤 걸 찾으세요? 그리고 특정 무게나 백색도가 필요하세요? 원하시는 종류를 알려주시면 재고를 확인해 볼게요."
         ),
         (
-            "I need pens and also want to know about shipping costs.",
-            "Shipping is $8.95 standard (3-5 days), free on orders over $100. We also have Expedited at $15.95 and Overnight at $39.95.\n\nFor pens — what type are you looking for? We carry ballpoint, gel, felt-tip, and rollerball in various colors. Are these for general office use, or something specific like document signing?"
+            "펜이 필요하고 배송비도 알고 싶어요.",
+            "배송비는 일반 8,950원 (3~5일), 10만원 이상 주문 시 무료입니다. 빠른 배송은 15,950원, 익일 배송은 39,950원이에요.\n\n펜은 — 어떤 종류를 찾으세요? 다양한 색상의 볼펜, 젤펜, 사인펜, 롤러볼펜을 취급해요. 일반 사무용인가요, 아니면 문서 서명 같은 특정 용도인가요?"
         ),
         (
-            "Do you carry folders? Also, can I return items if they don't work out?",
-            "Absolutely, returns are accepted within 30 days with an RMA from returns@officeflow.com. Defective items can be returned anytime.\n\nAs for folders, we have a few options — manila file folders, hanging file folders, and presentation folders. Are you looking for filing cabinet folders or desk organization? That'll help me find the right fit."
+            "폴더 취급하시나요? 그리고 안 맞으면 반품 가능한가요?",
+            "물론입니다, 반품은 returns@officeflow.com 에서 RMA를 발급받으시면 30일 이내 가능해요. 불량품은 언제든 반품 가능합니다.\n\n폴더는 몇 가지 옵션이 있어요 — 마닐라 서류 폴더, 걸이형 서류 폴더, 프레젠테이션 폴더 등이요. 서류 캐비닛용 폴더를 찾으세요, 아니면 책상 정리용을 원하세요? 그 정보로 맞는 걸 찾아드릴게요."
         ),
         (
-            "I need notebooks for our office. Also, do you ship to Canada?",
-            "Yes, we ship to all Canadian provinces and territories! Expect 1-2 extra days for customs, and duties/taxes may apply.\n\nFor notebooks, we carry spiral-bound in different sizes and rulings, plus legal pads. Are you looking for something specific — college-ruled, wide-ruled, or graph paper? And roughly how many do you need?"
+            "사무실용 노트가 필요해요. 해외 배송도 가능한가요?",
+            "네, 가까운 아시아 국가는 모두 배송 가능합니다! 통관에 1~2일 추가 소요되고, 관세/세금이 부과될 수 있어요.\n\n노트는 다양한 사이즈와 줄의 스프링 노트, 그리고 리갈 패드를 취급해요. 특정한 걸 찾으세요 — 칸 줄, 일반 줄, 모눈 종이? 대략 몇 권 필요하세요?"
         ),
         (
-            "My name is {name} from {company}. I need some tape, and also wanted to ask about free shipping.",
-            "Hi {name}! Standard shipping is free on orders of $100 or more, and expedited is free at $250+.\n\nFor tape — are you looking for desk tape (invisible/clear), packing tape for shipping, or something like masking tape? We carry a few different types and it depends on what you need it for."
+            "저는 {company}의 {name}입니다. 테이프가 필요하고 무료 배송도 알고 싶어요.",
+            "{name}님 안녕하세요! 일반 배송은 10만원 이상 주문 시 무료, 빠른 배송은 25만원 이상 무료입니다.\n\n테이프는 — 데스크 테이프(투명)를 원하세요, 배송용 박스 테이프를 원하세요, 아니면 마스킹 테이프 같은 걸 원하세요? 종류가 몇 가지 있고 용도에 따라 다른 게 좋아요."
         ),
         (
-            "Do you have markers? And what's the fastest shipping option?",
-            "Our fastest option is Overnight Shipping at $39.95 — order by 12:00 PM EST for next-business-day delivery.\n\nFor markers, what type do you need? We carry dry erase markers for whiteboards, permanent markers, and highlighters. Any specific colors you're after?"
+            "마카 있나요? 그리고 가장 빠른 배송 옵션이 뭐예요?",
+            "가장 빠른 옵션은 익일 배송(39,950원)입니다 — KST 정오까지 주문하시면 다음 영업일에 받으실 수 있어요.\n\n마카는 — 어떤 종류가 필요하세요? 화이트보드용 보드마카, 유성 마카, 형광펜을 취급해요. 특정 색상을 찾으시나요?"
         ),
         (
-            "I'm looking at desk accessories. What do you have? Also, what are your business hours?",
-            "Our phone lines are open Monday-Friday 7:00 AM - 7:00 PM EST, Saturday 9:00 AM - 2:00 PM EST.\n\nFor desk accessories, we carry a range of things — organizer trays, letter trays, desk calendars, tape dispensers, and more. Are you outfitting a new desk, or looking for something specific?"
+            "책상 액세서리를 보고 있어요. 어떤 게 있나요? 그리고 영업시간은요?",
+            "전화 상담은 평일 오전 7시 ~ 오후 7시, 토요일 오전 9시 ~ 오후 2시 (KST)에 가능합니다.\n\n책상 액세서리는 다양해요 — 정리함, 서류 트레이, 탁상 달력, 테이프 디스펜서 등이요. 새 책상을 꾸미시나요, 아니면 특정한 걸 찾으세요?"
         ),
         (
-            "I need paper clips and also need to know how to process a return on order {order}.",
-            "For the return on {order}, contact returns@officeflow.com with your order number and reason — they'll issue an RMA within 4 business hours.\n\nAs for paper clips, we carry a couple of options. Are you looking for standard small paper clips, jumbo clips, or something like binder clips for thicker stacks?"
+            "클립이 필요하고 {order} 주문 반품 방법도 알고 싶어요.",
+            "{order} 반품은 returns@officeflow.com 으로 주문번호와 사유 보내시면 4영업시간 이내에 RMA가 발급됩니다.\n\n클립은 몇 가지 옵션이 있어요. 표준 작은 클립을 찾으세요, 점보 클립을 찾으세요, 아니면 두꺼운 묶음용 더블 클립을 찾으세요?"
         ),
         (
-            "Do you carry envelopes? And can I pick up my order at your warehouse?",
-            "Yes, Will Call Pickup is available at all four of our distribution centers — Portland, Chicago, Atlanta, and Toronto. Select it at checkout and it's usually ready in 2-4 hours.\n\nFor envelopes, what size are you looking for? We have #10 business envelopes, clasp envelopes, and catalog envelopes. Self-seal or regular?"
+            "봉투 취급하시나요? 그리고 창고에서 직접 픽업도 가능한가요?",
+            "네, 4곳의 물류센터 모두에서 방문 수령 가능합니다 — 서울, 부산, 광주, 인천이요. 결제 시 선택하시면 보통 2~4시간 안에 준비됩니다.\n\n봉투는 어떤 사이즈를 찾으세요? DL 비즈니스 봉투, 클러치 봉투, 카탈로그 봉투 등이 있어요. 자체 접착 스트립이 있는 것과 일반형이 있어요."
         ),
         (
-            "This is {name} at {company}. I need writing supplies, and also want to know about your bulk pricing.",
-            "Hi {name}! For bulk pricing at {company}, contact our sales team at sales@officeflow.com or 1-800-OFFICE-1 ext. 2 — they can get you a custom quote.\n\nFor writing supplies — are you looking for pens, pencils, markers, or a mix? And any preferences on type? Ballpoint pens are the go-to for general use, while gel pens are popular for smoother writing."
+            "저는 {company}의 {name}입니다. 필기 용품이 필요하고 대량 주문 가격도 알고 싶어요.",
+            "{name}님 안녕하세요! {company}의 대량 주문 가격은 sales@officeflow.com 또는 1588-0000 내선 2번으로 영업팀에 문의 주세요 — 맞춤 견적을 안내해 드립니다.\n\n필기 용품은 — 펜, 연필, 마카, 또는 섞어서 원하세요? 종류 선호도도 있으세요? 일반 사용에는 볼펜이 인기 있고, 부드러운 필기를 원하시면 젤펜이 좋아요."
         ),
         (
-            "I need sticky notes urgently. Do you have them? What's the fastest delivery?",
-            "With Overnight Shipping ($39.95), you can order by 12:00 PM EST and have it the next business day.\n\nFor sticky notes — we carry a few different options. Standard square pads, smaller flag-style markers, and various sizes. Are you looking for the classic 3x3 pads, or something different? Any color preferences?"
+            "포스트잇이 급하게 필요해요. 있나요? 가장 빠른 배송은 뭐예요?",
+            "익일 배송(39,950원)으로 KST 정오까지 주문하시면 다음 영업일에 받으실 수 있어요.\n\n포스트잇은 — 몇 가지 옵션이 있어요. 표준 정사각형 패드, 작은 플래그 스타일, 다양한 사이즈가 있어요. 클래식한 3x3 패드를 원하세요, 아니면 다른 걸 원하세요? 색상 선호도가 있으신가요?"
         ),
         (
-            "I need some organizational supplies. Also, what holidays are you closed?",
-            "We're closed on New Year's Day, Memorial Day, July 4th, Labor Day, Thanksgiving, and Christmas. Limited hours on the eves.\n\nFor organizational supplies, what are you trying to organize? We have filing options like manila and hanging folders, desk organizers, label makers, and binder accessories. Each works best for different setups."
+            "정리 용품이 필요해요. 그리고 휴무일이 언제인가요?",
+            "설날, 추석, 어린이날, 광복절, 개천절, 한글날, 성탄절에 휴무이고, 명절 전날에는 단축 영업입니다.\n\n정리 용품은 무엇을 정리하시려고요? 마닐라/걸이형 폴더 같은 파일링 옵션, 책상 정리함, 라벨 메이커, 바인더 액세서리가 있어요. 상황마다 잘 맞는 게 달라요."
         ),
         (
-            "Do you have correction supplies? Also, who do I contact about a damaged shipment?",
-            "For damaged shipments, photograph the damage and email fulfillment@officeflow.com within 48 hours. They'll arrange a replacement immediately.\n\nFor correction supplies — do you prefer correction tape or correction fluid? Tape has become more popular since it's neater and dries instantly. We typically carry both in multi-packs."
+            "수정 용품 있나요? 그리고 파손된 배송 건은 어디로 연락하나요?",
+            "파손 배송은 사진을 찍어 48시간 이내에 fulfillment@officeflow.com 으로 메일 주세요. 즉시 대체품을 발송해 드립니다.\n\n수정 용품은 — 수정 테이프와 수정액 중 어느 걸 선호하세요? 테이프가 깔끔하고 바로 마르기 때문에 더 인기 있어요. 보통 둘 다 멀티팩으로 취급해요."
         ),
         (
-            "I'm {name} from {company}. I need to get some filing supplies and understand your return policy.",
-            "Hi {name}! For returns, items can be returned within 30 days — contact returns@officeflow.com for an RMA. Defective items have no time limit.\n\nFor filing supplies at {company}, what type of filing system are you using? We carry manila folders, hanging folders, file folder labels, and sheet protectors. Filing cabinet, desk organizer, or binder-based?"
+            "저는 {company}의 {name}입니다. 파일링 용품이 필요하고 반품 정책도 알고 싶어요.",
+            "{name}님 안녕하세요! 반품은 30일 이내 가능합니다 — returns@officeflow.com 으로 RMA를 신청하세요. 불량품은 기간 제한 없어요.\n\n{company}의 파일링 용품은 — 어떤 파일링 시스템을 사용하세요? 마닐라 폴더, 걸이형 폴더, 서류 폴더 라벨, 투명 비닐 속지를 취급해요. 서류 캐비닛, 책상 정리함, 바인더 기반 중 어떤 거예요?"
         ),
         (
-            "Do you have scissors? And how do I track an order?",
-            "You can track orders at www.officeflow.com/track using your tracking number, which is emailed when the order ships.\n\nFor scissors — are you looking for standard office scissors, or something more specific? We typically carry 8-inch general-purpose scissors. How many pairs do you need?"
+            "가위 있나요? 그리고 주문 배송은 어떻게 조회하나요?",
+            "주문은 www.officeflow.com/track 에서 송장번호로 조회 가능하고, 송장번호는 출고 시 이메일로 발송됩니다.\n\n가위는 — 기본 사무용 가위를 찾으세요, 아니면 더 특정한 걸 원하세요? 보통 8인치 범용 가위를 취급해요. 몇 개 필요하세요?"
         ),
     ]
     pairs = []
@@ -1314,9 +1355,10 @@ def _both_clarification_questions():
 
 
 # ---------------------------------------------------------------------------
-# Trace generation
+# Trace 생성 관련 함수들
 # ---------------------------------------------------------------------------
-
+# LangSmith trace의 run 구조에 들어가는 RUNTIME 메타데이터 블록.
+# 실제 LangChain/LangSmith 환경에서 자동으로 수집되는 값과 동일한 형태.
 RUNTIME_BLOCK = {
     "langchain_core_version": "1.2.10",
     "langchain_version": "1.2.10",
@@ -1331,12 +1373,21 @@ RUNTIME_BLOCK = {
 
 
 def _ts_to_dotted(dt: datetime) -> str:
-    """Convert datetime to dotted_order timestamp format: YYYYMMDDTHHMMSSffffffZ"""
+    """datetime 을 dotted_order 형식 타임스탬프(YYYYMMDDTHHMMSSffffffZ)로 변환.
+
+    LangSmith의 dotted_order 는 trace 트리 안에서 run 의 순서를 표현하는 키로,
+    부모 run 의 dotted_order 뒤에 '.' 으로 자식 run 의 타임스탬프+UUID 를 이어붙여
+    만든다. 그래서 형식이 정확히 일치해야 한다.
+    """
     return dt.strftime("%Y%m%dT%H%M%S%fZ")
 
 
 def _gen_usage_metadata():
-    """Generate realistic usage_metadata for a ChatOpenAI run."""
+    """ChatAnthropic LLM run 의 그럴듯한 토큰 사용량 메타데이터 생성.
+
+    실제 Claude 호출 시 LangSmith 가 기록하는 input_tokens/output_tokens/
+    cache_read/reasoning 등의 분포를 흉내내기 위해 임의 값을 만들어 준다.
+    """
     input_tokens = random.randint(800, 4000)
     cache_read = random.choice([0, 0, 0, 512, 1024, 1152, 2048])
     reasoning = random.choice([0, 0, 640, 1280, 2560, 2880])
@@ -1351,18 +1402,22 @@ def _gen_usage_metadata():
     }
 
 
+# Emma 에이전트가 호출할 수 있는 툴 정의. 시스템 프롬프트에서 안내한 역할에 맞춰
+# 1) query_database  : 재고/상품 정보 SQL 조회
+# 2) search_knowledge_base : 회사 정책/절차 검색
+# 두 가지 함수 툴을 노출한다.
 TOOLS_BLOCK = [
     {
         "type": "function",
         "function": {
             "name": "query_database",
-            "description": "SQL query to get information about our inventory for customers like products, quantities and prices.",
+            "description": "재고 데이터베이스에서 상품/수량/가격 같은 고객 응대에 필요한 정보를 조회하는 SQL 쿼리.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "SQL query to execute against the inventory database.",
+                        "description": "재고 데이터베이스에 실행할 SQL 쿼리.",
                     }
                 },
                 "required": ["query"],
@@ -1373,13 +1428,13 @@ TOOLS_BLOCK = [
         "type": "function",
         "function": {
             "name": "search_knowledge_base",
-            "description": "Search for company policies, procedures, and general information.",
+            "description": "회사 정책, 절차, 일반 정보를 검색.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Natural language question or search query about company policies or information",
+                        "description": "회사 정책/정보에 대한 자연어 질문 또는 검색 쿼리",
                     }
                 },
                 "required": ["query"],
@@ -1390,15 +1445,21 @@ TOOLS_BLOCK = [
 
 
 def _rand_call_id():
-    return f"call_{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', k=24))}"
+    """툴 호출 ID. Anthropic Claude tool_use 블록의 'toolu_' 접두사 스타일."""
+    return f"toolu_{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', k=24))}"
 
 
 def _rand_chatcmpl_id():
-    return f"chatcmpl-{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', k=29))}"
+    """LLM 응답 ID. Anthropic 의 메시지 ID는 'msg_' 접두사를 사용한다."""
+    return f"msg_{''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789', k=29))}"
 
 
 def _make_root_run(root_id, question, response, messages, category, start_time, end_time):
-    """Create the root Emma chain run."""
+    """Emma 체인의 루트 run 생성. (run_type='chain', parent_run_id=None)
+
+    하나의 trace 트리의 최상위 노드. 자식 LLM run / tool run 은 모두
+    이 루트의 dotted_order 를 prefix 로 가진다.
+    """
     return {
         "id": root_id,
         "name": "Emma",
@@ -1428,9 +1489,15 @@ def _make_root_run(root_id, question, response, messages, category, start_time, 
 
 def _make_llm_run(run_id, root_id, messages, start_time, end_time, root_start,
                    finish_reason="stop", tool_calls=None, content=None):
-    """Create a ChatOpenAI LLM child run."""
+    """ChatAnthropic LLM 자식 run 생성. (run_type='llm', parent_run_id=root_id)
+
+    [모델] Anthropic Claude (claude-haiku-4-5) 호출을 시뮬레이션한다.
+    LangSmith trace 구조는 OpenAI chat completion 포맷과 호환되도록 유지하고,
+    ls_provider 만 'anthropic' 으로 표기한다. (LangSmith UI 호환성)
+    """
     usage = _gen_usage_metadata()
     root_dotted = f"{_ts_to_dotted(root_start)}{root_id}"
+    # 어시스턴트 메시지 본문. OpenAI chat completion 구조와 동일한 키들.
     msg = {
         "annotations": [], "audio": None,
         "content": content,
@@ -1439,11 +1506,11 @@ def _make_llm_run(run_id, root_id, messages, start_time, end_time, root_start,
     }
     return {
         "id": run_id,
-        "name": "ChatOpenAI",
+        "name": "ChatAnthropic",            # Anthropic Claude 호출
         "run_type": "llm",
         "inputs": {
             "messages": messages,
-            "model": "gpt-5-nano",
+            "model": "claude-haiku-4-5",    # Claude Haiku 4.5 모델 사용
             "tool_choice": "auto",
             "tools": TOOLS_BLOCK,
         },
@@ -1452,7 +1519,7 @@ def _make_llm_run(run_id, root_id, messages, start_time, end_time, root_start,
                          "logprobs": None, "message": msg}],
             "created": int(end_time.replace(tzinfo=timezone.utc).timestamp()),
             "id": _rand_chatcmpl_id(),
-            "model": "gpt-5-nano-2025-08-07",
+            "model": "claude-haiku-4-5-20251001",   # 모델 버전 식별자
             "object": "chat.completion",
             "service_tier": "default",
             "system_fingerprint": None,
@@ -1470,9 +1537,9 @@ def _make_llm_run(run_id, root_id, messages, start_time, end_time, root_start,
                 "LANGSMITH_TRACING": "true",
                 "ls_invocation_params": {},
                 "ls_method": "traceable",
-                "ls_model_name": "gpt-5-nano",
+                "ls_model_name": "claude-haiku-4-5",   # Anthropic 모델명
                 "ls_model_type": "chat",
-                "ls_provider": "openai",
+                "ls_provider": "anthropic",            # OpenAI → Anthropic 으로 변경
                 "ls_run_depth": 1,
                 "revision_id": "da98358-dirty",
                 "usage_metadata": usage,
@@ -1485,7 +1552,11 @@ def _make_llm_run(run_id, root_id, messages, start_time, end_time, root_start,
 
 
 def _make_tool_run(run_id, root_id, tool_name, inputs, output, start_time, end_time, root_start):
-    """Create a tool execution child run (run_type=chain, matching real traces)."""
+    """툴 실행 자식 run 생성. (실제 trace와 동일하게 run_type='chain'으로 기록)
+
+    LangSmith는 함수 형태의 툴 실행을 보통 chain run 으로 기록한다.
+    여기서는 query_database / search_knowledge_base 호출이 해당된다.
+    """
     root_dotted = f"{_ts_to_dotted(root_start)}{root_id}"
     return {
         "id": run_id,
@@ -1514,48 +1585,53 @@ def _make_tool_run(run_id, root_id, tool_name, inputs, output, start_time, end_t
     }
 
 
-# -- Fake DB results for inventory traces -----------------------------------
-
-# Products the agent can "find" in the DB
+# -- inventory trace 용 가짜 DB 결과 ------------------------------------------
+# 에이전트가 query_database 툴을 호출했을 때 "조회되었다고 가정"할 상품과
+# 재고 수량을 매핑. 형식: 상품명 -> (item_id, 보유 수량)
 _DB_PRODUCTS = {
-    "Copy Paper 500 Sheets": (1, 47),
-    "Blue Ballpoint Pens (12-pack)": (2, 120),
-    "Stapler with Staples": (3, 28),
-    "Spiral Notebooks (3-pack)": (4, 75),
-    "Manila File Folders (25-pack)": (5, 38),
-    "Sticky Notes (4-pack)": (6, 15),
-    "Dry Erase Markers (8-pack)": (7, 9),
-    "Paper Clips (100-pack)": (8, 200),
-    "Binder Clips (24-pack)": (9, 65),
-    "Legal Pads (6-pack)": (10, 42),
-    "Highlighters (5-pack)": (11, 18),
-    "Desk Organizer Tray": (12, 3),
-    "Correction Tape (3-pack)": (13, 55),
-    "Scissors - 8 inch": (14, 22),
-    "Rubber Bands (Assorted)": (15, 90),
-    "Tape Dispenser with Tape": (16, 31),
-    "Envelopes #10 (100-pack)": (17, 60),
-    "Index Cards (3x5, 100-pack)": (18, 44),
-    "Whiteboard Eraser": (19, 12),
-    "Push Pins (100-pack)": (20, 150),
-    "Hanging File Folders (25-pack)": (21, 35),
-    "Sheet Protectors (50-pack)": (22, 26),
-    "Mechanical Pencils (12-pack)": (23, 80),
-    "Black Gel Pens (6-pack)": (24, 0),
-    "Desk Calendar 2026": (25, 7),
-    "Letter Trays (2-tier)": (26, 14),
-    "Glue Sticks (6-pack)": (27, 50),
-    "Post-it Flags (4 colors)": (28, 33),
-    "Laminating Pouches (50-pack)": (29, 19),
-    "Clipboard - Standard": (30, 41),
+    "복사용지 500매": (1, 47),
+    "블루 볼펜 (12자루)": (2, 120),
+    "스테이플러 세트": (3, 28),
+    "스프링 노트 (3권)": (4, 75),
+    "마닐라 서류 폴더 (25개)": (5, 38),
+    "포스트잇 메모지 (4개)": (6, 15),
+    "보드마카 (8개)": (7, 9),
+    "클립 (100개)": (8, 200),
+    "더블 클립 (24개)": (9, 65),
+    "리갈 패드 (6권)": (10, 42),
+    "형광펜 (5개)": (11, 18),
+    "데스크 정리함": (12, 3),
+    "수정테이프 (3개)": (13, 55),
+    "사무용 가위 8인치": (14, 22),
+    "고무밴드 모음팩": (15, 90),
+    "테이프 디스펜서": (16, 31),
+    "DL 봉투 (100매)": (17, 60),
+    "인덱스 카드 (100매)": (18, 44),
+    "화이트보드 지우개": (19, 12),
+    "압정 (100개)": (20, 150),
+    "걸이형 서류 폴더 (25개)": (21, 35),
+    "투명 비닐 속지 (50매)": (22, 26),
+    "샤프 (12자루)": (23, 80),
+    "흑색 젤펜 (6자루)": (24, 0),    # 재고 0 = 품절 시뮬레이션
+    "2026 탁상 달력": (25, 7),
+    "2단 서류 트레이": (26, 14),
+    "딱풀 (6개)": (27, 50),
+    "포스트잇 플래그 (4색)": (28, 33),
+    "코팅 필름 (50매)": (29, 19),
+    "기본 클립보드": (30, 41),
 }
 
 
 def _extract_product_keyword(question):
-    """Try to extract a product keyword from the question to build a realistic SQL query."""
+    """질문 문자열에서 상품 키워드를 추출해 그럴듯한 SQL 쿼리를 만들 수 있게 한다.
+
+    PRODUCTS 의 각 상품명을 단어 단위로 쪼개고, 길이가 3 글자 초과인 단어가
+    질문 안에 등장하면 그 단어와 매칭된 상품을 반환한다.
+    매칭 실패 시 (None, None) 반환.
+    """
     q = question.lower()
     for product in PRODUCTS:
-        # Check if a key word from the product name appears in the question
+        # 상품명에서 핵심 단어(3 글자 초과) 추출
         for word in product.lower().split():
             if len(word) > 3 and word in q:
                 return word, product
@@ -1563,29 +1639,38 @@ def _extract_product_keyword(question):
 
 
 def _make_trace_with_tools(question, response, category, start_time):
-    """Generate a trace with tool calls: LLM→schema→LLM→query→LLM(answer).
+    """툴 호출이 포함된 trace 생성: LLM → 스키마 조회 → LLM → 상품 조회 → LLM(최종 답변).
 
-    Used for inventory / both categories where the agent should check the DB.
+    inventory / both 카테고리처럼 에이전트가 DB를 조회해야 하는 경우에 사용된다.
+    실행 흐름:
+      1) LLM 호출 1: 어떤 테이블이 있는지 알기 위해 query_database(SELECT name FROM sqlite_master) 호출
+      2) Tool 호출 1: 테이블 목록 반환 ([('items',), ('stock_levels',)])
+      3) LLM 호출 2: 상품 정보 조회를 위한 JOIN SQL 호출
+      4) Tool 호출 2: 상품/재고 결과 반환
+      5) LLM 호출 3: 최종 답변 생성
     """
     root_id = str(uuid.uuid4())
     root_start = start_time
-    t = start_time  # running clock
+    t = start_time  # 진행 시계(매 step 마다 누적)
 
     runs = []
+    # 대화의 시작점: 시스템 프롬프트(Emma 페르소나) + 고객 질문
     messages = [
         {"content": SYSTEM_PROMPT, "role": "system"},
         {"content": question, "role": "user"},
     ]
 
+    # 질문 텍스트에서 상품 키워드 추출 시도
     keyword, matched_product = _extract_product_keyword(question)
-    # Fallback: pick a random product if we can't match
+    # 매칭 실패 시 폴백: 임의의 상품 선택
     if not matched_product:
         matched_product = random.choice(PRODUCTS)
         keyword = matched_product.split()[0].lower()
 
+    # 가짜 DB 결과 조회
     item_id, units = _DB_PRODUCTS.get(matched_product, (1, 47))
 
-    # --- LLM call 1: decides to call query_database for schema discovery ---
+    # --- LLM 호출 1: 스키마 확인을 위해 query_database 호출 ---
     llm1_id = str(uuid.uuid4())
     schema_call_id = _rand_call_id()
     llm1_start = t + timedelta(seconds=random.uniform(0.3, 1.0))
@@ -1604,7 +1689,7 @@ def _make_trace_with_tools(question, response, category, start_time):
         finish_reason="tool_calls", tool_calls=schema_tool_call, content=None,
     ))
 
-    # --- Tool run 1: schema discovery result ---
+    # --- Tool 호출 1: 스키마 조회 결과 (테이블 목록 반환) ---
     tool1_id = str(uuid.uuid4())
     tool1_start = llm1_end + timedelta(seconds=random.uniform(0.001, 0.01))
     tool1_end = tool1_start + timedelta(seconds=random.uniform(0.001, 0.005))
@@ -1617,12 +1702,13 @@ def _make_trace_with_tools(question, response, category, start_time):
         schema_result, tool1_start, tool1_end, root_start,
     ))
 
-    # --- LLM call 2: decides to query for the product ---
+    # --- LLM 호출 2: 상품 조회용 JOIN SQL 결정 ---
     llm2_id = str(uuid.uuid4())
     search_call_id = _rand_call_id()
     llm2_start = tool1_end + timedelta(seconds=random.uniform(0.1, 0.5))
     llm2_end = llm2_start + timedelta(seconds=random.uniform(1.5, 4.0))
 
+    # items 와 stock_levels 를 JOIN 하여 LIKE 키워드 검색
     search_sql = f"SELECT i.item_id, i.sku_label, s.available_units FROM items i JOIN stock_levels s ON i.item_id = s.item_id WHERE LOWER(i.sku_label) LIKE LOWER('%{keyword}%')"
     product_tool_call = [{
         "type": "function", "id": search_call_id,
@@ -1637,7 +1723,7 @@ def _make_trace_with_tools(question, response, category, start_time):
         finish_reason="tool_calls", tool_calls=product_tool_call, content=None,
     ))
 
-    # --- Tool run 2: product query result ---
+    # --- Tool 호출 2: 상품/재고 쿼리 결과 ---
     tool2_id = str(uuid.uuid4())
     tool2_start = llm2_end + timedelta(seconds=random.uniform(0.001, 0.01))
     tool2_end = tool2_start + timedelta(seconds=random.uniform(0.001, 0.005))
@@ -1650,7 +1736,7 @@ def _make_trace_with_tools(question, response, category, start_time):
         query_result, tool2_start, tool2_end, root_start,
     ))
 
-    # --- LLM call 3: final answer ---
+    # --- LLM 호출 3: 최종 답변 생성 ---
     llm3_id = str(uuid.uuid4())
     llm3_start = tool2_end + timedelta(seconds=random.uniform(0.1, 0.5))
     llm3_end = llm3_start + timedelta(seconds=random.uniform(1.0, 3.0))
@@ -1661,7 +1747,7 @@ def _make_trace_with_tools(question, response, category, start_time):
         finish_reason="stop", tool_calls=None, content=response,
     ))
 
-    # --- Root run wraps everything ---
+    # --- 루트 run 으로 전체를 묶음 ---
     root_end = llm3_end + timedelta(seconds=random.uniform(0.001, 0.05))
     runs.append(_make_root_run(
         root_id, question, response, messages, category, root_start, root_end,
@@ -1671,9 +1757,12 @@ def _make_trace_with_tools(question, response, category, start_time):
 
 
 def _make_trace_with_kb(question, response, category, start_time):
-    """Generate a trace with a search_knowledge_base tool call.
+    """search_knowledge_base 툴 호출이 포함된 trace 생성.
 
-    Used for policy category.
+    policy 카테고리에서 사용된다. 흐름:
+      1) LLM 호출 1: search_knowledge_base 툴 호출 결정
+      2) Tool 호출: 정책 문서 검색 결과 반환 (returns_policy.md 등)
+      3) LLM 호출 2: 검색 결과를 바탕으로 최종 답변 생성
     """
     root_id = str(uuid.uuid4())
     root_start = start_time
@@ -1685,13 +1774,13 @@ def _make_trace_with_kb(question, response, category, start_time):
         {"content": question, "role": "user"},
     ]
 
-    # --- LLM call 1: decides to search knowledge base ---
+    # --- LLM 호출 1: 지식베이스 검색 결정 ---
     llm1_id = str(uuid.uuid4())
     kb_call_id = _rand_call_id()
     llm1_start = t + timedelta(seconds=random.uniform(0.3, 1.0))
     llm1_end = llm1_start + timedelta(seconds=random.uniform(1.5, 4.0))
 
-    kb_query = question  # use the question itself as the KB search
+    kb_query = question  # 질문 자체를 KB 검색 쿼리로 사용
     kb_tool_call = [{
         "type": "function", "id": kb_call_id,
         "function": {
@@ -1705,11 +1794,11 @@ def _make_trace_with_kb(question, response, category, start_time):
         finish_reason="tool_calls", tool_calls=kb_tool_call, content=None,
     ))
 
-    # --- Tool run: KB search result (abbreviated) ---
+    # --- Tool 호출: KB 검색 결과 (축약 형태로 시뮬레이션) ---
     tool1_id = str(uuid.uuid4())
     tool1_start = llm1_end + timedelta(seconds=random.uniform(0.05, 0.2))
     tool1_end = tool1_start + timedelta(seconds=random.uniform(0.1, 0.3))
-    kb_result = "=== returns_policy.md (relevance: 0.52) ===\n(policy content)\n\n=== shipping_policy.md (relevance: 0.38) ===\n(policy content)"
+    kb_result = "=== returns_policy.md (relevance: 0.52) ===\n(정책 내용)\n\n=== shipping_policy.md (relevance: 0.38) ===\n(정책 내용)"
     messages.append({"role": "tool", "name": "search_knowledge_base",
                      "tool_call_id": kb_call_id, "content": kb_result})
     runs.append(_make_tool_run(
@@ -1718,7 +1807,7 @@ def _make_trace_with_kb(question, response, category, start_time):
         kb_result, tool1_start, tool1_end, root_start,
     ))
 
-    # --- LLM call 2: final answer ---
+    # --- LLM 호출 2: 최종 답변 생성 ---
     llm2_id = str(uuid.uuid4())
     llm2_start = tool1_end + timedelta(seconds=random.uniform(0.1, 0.5))
     llm2_end = llm2_start + timedelta(seconds=random.uniform(1.0, 3.0))
@@ -1729,7 +1818,7 @@ def _make_trace_with_kb(question, response, category, start_time):
         finish_reason="stop", tool_calls=None, content=response,
     ))
 
-    # --- Root run ---
+    # --- 루트 run ---
     root_end = llm2_end + timedelta(seconds=random.uniform(0.001, 0.05))
     runs.append(_make_root_run(
         root_id, question, response, messages, category, root_start, root_end,
@@ -1739,9 +1828,10 @@ def _make_trace_with_kb(question, response, category, start_time):
 
 
 def _make_trace_no_tools(question, response, category, start_time):
-    """Generate a simple trace with NO tool calls (LLM answers directly).
+    """툴 호출이 없는 단순 trace 생성 (LLM이 바로 답변).
 
-    Used for out_of_scope, website_troubleshooting, and failure-mode traces.
+    out_of_scope, website_troubleshooting, failure-mode trace 등 툴 호출이
+    필요 없는 경우에 사용된다. LLM run 1개 + 루트 run 1개로 구성된다.
     """
     root_id = str(uuid.uuid4())
     root_start = start_time
@@ -1772,22 +1862,26 @@ def _make_trace_no_tools(question, response, category, start_time):
 
 
 def _make_trace(question, response, category, start_time, *, has_tool_calls=False):
-    """Route to the right trace generator based on category and tool-call flag."""
+    """카테고리와 툴 호출 플래그에 따라 적절한 trace 생성기로 라우팅한다."""
     if category in ("inventory",) and has_tool_calls:
         return _make_trace_with_tools(question, response, category, start_time)
     elif category == "both" and has_tool_calls:
-        # Both = DB + KB.  For simplicity, just do the DB tool calls
-        # (the KB part is covered by the response content)
+        # both = DB + KB 둘 다 봐야 하지만, 단순화를 위해 DB 툴 호출만 생성한다.
+        # (KB 쪽 내용은 응답 텍스트 자체에 이미 반영됨)
         return _make_trace_with_tools(question, response, category, start_time)
     elif category == "policy":
         return _make_trace_with_kb(question, response, category, start_time)
     else:
-        # out_of_scope, website_troubleshooting, or failure-mode (no tools)
+        # out_of_scope, website_troubleshooting, failure-mode → 툴 호출 없음
         return _make_trace_no_tools(question, response, category, start_time)
 
 
 def _fill_category(gen_fn, count: int):
-    """Generate exactly `count` (question, response) pairs by cycling templates."""
+    """템플릿을 순환 사용하여 정확히 `count` 개의 (질문, 응답) 페어를 생성한다.
+
+    템플릿 수보다 더 많은 trace 가 필요하면 gen_fn() 을 다시 호출해
+    랜덤 placeholder 값이 갱신된 새 페어를 사용한다.
+    """
     base_pairs = gen_fn()
     pairs = []
     i = 0
@@ -1795,7 +1889,7 @@ def _fill_category(gen_fn, count: int):
         if i < len(base_pairs):
             pairs.append(base_pairs[i])
         else:
-            # Re-generate with fresh random values
+            # 새로운 랜덤 값으로 다시 생성
             fresh = gen_fn()
             pairs.append(fresh[i % len(fresh)])
         i += 1
@@ -1803,9 +1897,10 @@ def _fill_category(gen_fn, count: int):
 
 
 def _inject_failures(items, failure_fn, failure_count):
-    """Replace `failure_count` random entries in `items` with failure-mode pairs.
+    """items 의 임의 위치 `failure_count` 개를 failure-mode 페어로 교체한다.
 
-    items is a list of (question, response, is_failure) tuples.
+    items 는 (질문, 응답, is_failure) 튜플의 리스트.
+    이렇게 해야 평가 데이터에 일정 비율의 잘못된 응답이 섞여 들어가게 된다.
     """
     failure_pairs = _fill_category(failure_fn, failure_count)
     indices = random.sample(range(len(items)), failure_count)
@@ -1817,8 +1912,10 @@ def _inject_failures(items, failure_fn, failure_count):
 def main():
     import os
 
+    # 재현성을 위해 시드 고정. 동일한 시드로 실행하면 항상 같은 trace 가 생성됨.
     random.seed(42)
 
+    # 카테고리명 → 질문 템플릿 함수 매핑
     category_generators = {
         "inventory": _inventory_questions,
         "policy": _policy_questions,
@@ -1827,19 +1924,19 @@ def main():
         "website_troubleshooting": _website_troubleshooting_questions,
     }
 
-    # Failure-mode injection rates (per 200 traces in each category)
-    TROUBLESHOOTING_OVERCONFIDENT_COUNT = 40   # 20% of website_troubleshooting
-    INVENTORY_CLARIFICATION_COUNT = 35         # ~18% of inventory
-    BOTH_CLARIFICATION_COUNT = 30              # 15% of both
+    # Failure-mode 주입 비율 (카테고리당 200건 기준)
+    TROUBLESHOOTING_OVERCONFIDENT_COUNT = 40   # website_troubleshooting 의 20%
+    INVENTORY_CLARIFICATION_COUNT = 35         # inventory 의 약 18%
+    BOTH_CLARIFICATION_COUNT = 30              # both 의 15%
 
-    # Collect all (question, response, category, is_failure) quads
+    # 모든 (질문, 응답, 카테고리, is_failure) 4-튜플을 모은다
     all_items = []
     for cat in CATEGORIES:
         pairs = _fill_category(category_generators[cat], TRACES_PER_CATEGORY)
-        # Convert to (q, a, is_failure) triples
+        # (질문, 응답, is_failure) 3-튜플로 변환 (정상 trace 는 is_failure=False)
         items = [(q, a, False) for q, a in pairs]
 
-        # Inject failure-mode traces into the appropriate categories
+        # 카테고리별로 failure-mode trace 주입
         if cat == "website_troubleshooting":
             items = _inject_failures(
                 items, _website_troubleshooting_overconfident_questions,
@@ -1859,50 +1956,53 @@ def main():
         for q, a, is_failure in items:
             all_items.append((q, a, cat, is_failure))
 
-    # Shuffle to intersperse categories
+    # 카테고리를 무작위로 섞어서 시간 순으로 보았을 때 카테고리가 골고루 분포되도록 한다
     random.shuffle(all_items)
 
     total_traces = len(all_items)
-    print(f"Generating {total_traces} traces ({TRACES_PER_CATEGORY} per category)...")
+    print(f"{total_traces}개의 trace 를 생성합니다 (카테고리당 {TRACES_PER_CATEGORY}건)...")
 
-    # Spread across ~2 hours, with random gaps between traces
+    # 약 2시간 구간에 trace 들을 분산 배치 (랜덤 간격)
     base_time = datetime(2026, 2, 15, 19, 0, 0)
-    total_window_seconds = 2 * 3600  # 2 hours
+    total_window_seconds = 2 * 3600  # 2시간
     avg_gap = total_window_seconds / total_traces
 
     all_runs = []
     current_time = base_time
     for question, response, category, is_failure in all_items:
-        # Good inventory/both traces get tool calls; failures don't
+        # 정상 inventory/both trace 만 툴 호출 포함; failure 는 툴 호출 없음
         has_tools = (not is_failure) and category in ("inventory", "both")
         runs = _make_trace(question, response, category, current_time,
                            has_tool_calls=has_tools)
         all_runs.extend(runs)
+        # 평균 간격의 0.3~1.7 배 사이로 다음 trace 시작 시각 결정
         gap = random.uniform(avg_gap * 0.3, avg_gap * 1.7)
         current_time += timedelta(seconds=gap)
 
-    # Stats
+    # 통계 출력
     trace_count = sum(1 for r in all_runs if r["name"] == "Emma")
     run_count = len(all_runs)
     tool_runs = sum(1 for r in all_runs if r["name"] in ("query_database", "search_knowledge_base"))
-    print(f"Generated {run_count} total runs across {trace_count} traces")
-    print(f"  Tool call runs: {tool_runs}")
+    print(f"총 {run_count}개 run / {trace_count}개 trace 생성 완료")
+    print(f"  툴 호출 run 수: {tool_runs}")
 
+    # 카테고리별 통계
     cat_counts = {}
     for run in all_runs:
         if run["run_type"] == "chain" and run["name"] == "Emma":
             for tag in run["tags"]:
                 cat_counts[tag] = cat_counts.get(tag, 0) + 1
-    print("Category breakdown:")
+    print("카테고리별 분포:")
     for cat, count in sorted(cat_counts.items()):
         print(f"  {cat}: {count}")
 
-    # Write output
+    # 결과 JSON 파일로 저장
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_path = os.path.join(script_dir, OUTPUT_FILE)
-    with open(output_path, "w") as f:
-        json.dump(all_runs, f, indent=2)
-    print(f"Wrote {output_path}")
+    with open(output_path, "w", encoding="utf-8") as f:
+        # ensure_ascii=False 로 한글이 그대로 저장되도록 함
+        json.dump(all_runs, f, indent=2, ensure_ascii=False)
+    print(f"{output_path} 파일에 저장했습니다.")
 
 
 if __name__ == "__main__":
