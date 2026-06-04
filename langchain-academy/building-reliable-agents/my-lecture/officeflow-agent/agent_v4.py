@@ -327,7 +327,7 @@ def save_thread_history(thread_id: str, messages: list):
     thread_store[thread_id] = messages
 
 @traceable(name="Emma", metadata={"thread_id": thread_id})
-async def chat(question: str) -> dict:
+async def chat(question: str, thread_id: str | None = None) -> dict:
     """
     사용자 질문을 받아 도구 호출을 포함한 에이전트 루프를 돌고 최종 응답을 반환.
 
@@ -339,7 +339,17 @@ async def chat(question: str) -> dict:
 
     반환값은 {"messages": ..., "output": ...} 형식으로,
     LangSmith 추적 시 전체 메시지 흐름과 최종 응답을 함께 확인할 수 있음.
+
+    thread_id 파라미터:
+      - None(기본값)이면 호출마다 새 ID를 생성 → 이전 대화 문맥과 완전히 격리.
+        평가(aevaluate)처럼 example 간 독립성이 필요할 때 사용.
+      - 명시적으로 전달하면 해당 thread_store 슬롯에 누적되어 멀티턴 대화가 가능.
+        CLI(main) 처럼 같은 세션의 발화를 이어붙이고 싶을 때 사용.
     """
+    # 호출별 thread_id 확보: 미지정 시 새 ID → thread_store 키가 분리되어
+    # 이전 example의 messages가 다음 호출로 새지 않음.
+    thread_id = thread_id or str(uuid7())
+
     db_path = str(Path(__file__).parent / 'inventory' / 'inventory.db')
     tools = [QUERY_DATABASE_TOOL, SEARCH_KNOWLEDGE_BASE_TOOL]
 
@@ -445,7 +455,8 @@ async def main():
         if not user_input:  # 빈 입력은 무시
             continue
 
-        result = await chat(user_input)
+        # CLI는 모듈 레벨 thread_id를 명시적으로 전달해 같은 슬롯에 멀티턴 대화를 누적.
+        result = await chat(user_input, thread_id=thread_id)
         response = result["output"]
         print(f"\nAgent: {response}\n")
 
