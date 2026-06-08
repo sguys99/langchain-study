@@ -4,6 +4,9 @@
 
 
 ## AIAgent.py
+
+![Plan-and-Execute Architecture](img/1-1.png)
+
 AIAgent.py는 구조화된 ‘계획-실행(Plan-and-Execute)’ 방식의 AI 에이전트를 구현합니다.   
 이 에이전트는 복잡한 사용자 질문을 순차적이고 간단한 작업들로 분해하도록 설계되었습니다.   
 그런 다음 사용 가능한 도구 세트를 활용하여 이러한 작업을 실행하고, 그 결과를 바탕으로 간결한 최종 답변을 도출합니다.   
